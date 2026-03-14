@@ -72,8 +72,18 @@ class Viewer3D(gl.GLViewWidget):
         # Custom camera pan offset (screen space translation)
         self.pan_offset = QVector3D(0, 0, 0)
         
+        # Axes size state
+        self.current_axes_size = 20
+        self.target_axes_size = 20
+        
         # Enable keyboard focus
         self.setFocusPolicy(Qt.StrongFocus)
+        
+        # Long press state for middle click
+        self.long_press_timer = QTimer(self)
+        self.long_press_timer.setSingleShot(True)
+        self.long_press_timer.timeout.connect(self.on_long_press_timeout)
+        self.is_long_press = False
         
         # Animation state
         self.animation_timer = QTimer(self)
@@ -99,6 +109,15 @@ class Viewer3D(gl.GLViewWidget):
         self.addItem(self.y_axis)
         self.addItem(self.z_axis)
         
+        # Add Text Labels
+        self.x_label = gl.GLTextItem(pos=np.array([20, 0, 0]), text='X', color=(1, 1, 1, 1))
+        self.y_label = gl.GLTextItem(pos=np.array([0, 20, 0]), text='Y', color=(1, 1, 1, 1))
+        self.z_label = gl.GLTextItem(pos=np.array([0, 0, 20]), text='Z', color=(1, 1, 1, 1))
+        
+        self.addItem(self.x_label)
+        self.addItem(self.y_label)
+        self.addItem(self.z_label)
+        
         # Initial size
         self.update_axes_size(20)
 
@@ -108,6 +127,7 @@ class Viewer3D(gl.GLViewWidget):
         """
         # Ensure minimum size
         size = max(size, 20)
+        self.current_axes_size = size
         
         # Negative extension (origin back-shoot)
         neg_ext = -size * 0.5
@@ -124,6 +144,13 @@ class Viewer3D(gl.GLViewWidget):
         # Z Axis (Blue)
         pos_z = np.array([[0, 0, neg_ext], [0, 0, pos_ext]])
         self.z_axis.setData(pos=pos_z, color=(0, 0, 1, 1))
+        
+        # Update Labels Position
+        # Offset slightly from the end
+        label_offset = size * 1.05 
+        self.x_label.setData(pos=np.array([label_offset, 0, 0]))
+        self.y_label.setData(pos=np.array([0, label_offset, 0]))
+        self.z_label.setData(pos=np.array([0, 0, label_offset]))
         
         # Update grid size
         if hasattr(self, 'grid'):
@@ -185,7 +212,9 @@ class Viewer3D(gl.GLViewWidget):
         
         # Middle button for reset animation
         if ev.button() == Qt.MouseButton.MiddleButton:
-            self.start_reset_animation()
+            # Start timer for long press (1 second)
+            self.is_long_press = False
+            self.long_press_timer.start(1000)
             ev.accept()
             return
             
@@ -197,6 +226,33 @@ class Viewer3D(gl.GLViewWidget):
             ev.accept()
         else:
             super().mousePressEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        """
+        Handle mouse release events.
+        """
+        if ev.button() == Qt.MouseButton.MiddleButton:
+            # If timer is still active, it's a short press
+            if self.long_press_timer.isActive():
+                self.long_press_timer.stop()
+                if not self.is_long_press:
+                    # Short press: Partial Reset (Keep zoom/scale)
+                    self.start_reset_animation(full_reset=False)
+            
+            # Reset flag
+            self.is_long_press = False
+            ev.accept()
+        else:
+            super().mouseReleaseEvent(ev)
+
+    def on_long_press_timeout(self):
+        """
+        Called when middle button is held for 1 second.
+        Triggers full reset.
+        """
+        self.is_long_press = True
+        # Full Reset (Reset zoom/scale to defaults)
+        self.start_reset_animation(full_reset=True)
 
     def keyPressEvent(self, ev):
         """
@@ -244,7 +300,8 @@ class Viewer3D(gl.GLViewWidget):
             target_dist = max_dist * 2.5
             
         # Update axes and grid size to match the scale
-        self.update_axes_size(target_dist / 2)
+        # Use animation by setting target
+        self.target_axes_size = target_dist / 2
             
         # Get current camera state
         current_cam = self.cameraParams()
@@ -255,7 +312,8 @@ class Viewer3D(gl.GLViewWidget):
             'elevation': current_cam['elevation'],
             'azimuth': current_cam['azimuth'],
             'pan_x': self.pan_offset.x(),
-            'pan_y': self.pan_offset.y()
+            'pan_y': self.pan_offset.y(),
+            'axes_size': self.current_axes_size
         }
         
         self.target_state = {
@@ -263,7 +321,8 @@ class Viewer3D(gl.GLViewWidget):
             'elevation': current_cam['elevation'], # Maintain current rotation
             'azimuth': current_cam['azimuth'],     # Maintain current rotation
             'pan_x': 0,                            # Reset pan to center origin
-            'pan_y': 0
+            'pan_y': 0,
+            'axes_size': self.target_axes_size
         }
         
         self.animation_start_time = QTime.currentTime()
@@ -351,14 +410,24 @@ class Viewer3D(gl.GLViewWidget):
         
         ev.accept()
 
-    def start_reset_animation(self):
+    def start_reset_animation(self, full_reset=True):
         """
         Start the camera reset animation.
+        
+        Args:
+            full_reset (bool): If True, resets zoom and axes scale to defaults.
+                               If False, keeps current zoom and axes scale.
         """
         current_params = self.cameraParams()
         
-        # Reset axes size to initial default
-        self.update_axes_size(20)
+        if full_reset:
+            # Reset axes size to initial default
+            self.target_axes_size = 20
+            target_distance = self.initial_state['distance']
+        else:
+            # Keep current axes size and distance
+            self.target_axes_size = self.current_axes_size
+            target_distance = current_params['distance']
         
         # Calculate shortest path for azimuth
         current_azim = current_params['azimuth']
@@ -378,14 +447,17 @@ class Viewer3D(gl.GLViewWidget):
             'elevation': current_params['elevation'],
             'azimuth': current_params['azimuth'],
             'pan_x': self.pan_offset.x(),
-            'pan_y': self.pan_offset.y()
+            'pan_y': self.pan_offset.y(),
+            'axes_size': self.current_axes_size
         }
         
         # Set target state
         self.target_state = self.initial_state.copy()
+        self.target_state['distance'] = target_distance # Use determined target distance
         self.target_state['azimuth'] = effective_target_azim # Use the calculated shortest path target
         self.target_state['pan_x'] = 0
         self.target_state['pan_y'] = 0
+        self.target_state['axes_size'] = self.target_axes_size
         
         # Start animation timer
         self.animation_start_time = QTime.currentTime()
@@ -421,6 +493,11 @@ class Viewer3D(gl.GLViewWidget):
         new_pan_y = self.start_state['pan_y'] + (self.target_state['pan_y'] - self.start_state['pan_y']) * ease
         self.pan_offset.setX(new_pan_x)
         self.pan_offset.setY(new_pan_y)
+        
+        # Interpolate axes size
+        if 'axes_size' in self.start_state and 'axes_size' in self.target_state:
+            new_axes_size = self.start_state['axes_size'] + (self.target_state['axes_size'] - self.start_state['axes_size']) * ease
+            self.update_axes_size(new_axes_size)
         
         # Update standard camera params
         self.setCameraPosition(
