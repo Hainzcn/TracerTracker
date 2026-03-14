@@ -1,0 +1,44 @@
+{
+    "udp": {
+        "enabled": true,
+        "ip": "127.0.0.1",
+        "port": 8888
+    },
+    "serial": {
+        "enabled": false,
+        "port": "COM3",
+        "baudrate": 115200,
+        "timeout": 1
+    },
+    "points": [
+        {
+            "name": "Point 1 (Spiral 1)",
+            "source": "udp",
+            "color": [255, 0, 0, 255],
+            "size": 15,
+            "x": { "index": 0, "multiplier": 1.0 },
+            "y": { "index": 1, "multiplier": 1.0 },
+            "z": { "index": 2, "multiplier": 1.0 }
+        },
+        {
+            "name": "Point G (Prefixed)",
+            "source": "udp",
+            "prefix": "G",
+            "color": [0, 0, 255, 255],
+            "size": 15,
+            "x": { "index": 0, "multiplier": 1.0 },
+            "y": { "index": 1, "multiplier": -1.0 },
+            "z": { "index": 2, "multiplier": -1.0 }
+        },
+        {
+            "name": "Point H (Prefixed)",
+            "source": "udp",
+            "prefix": "H",
+            "color": [255, 0, 0, 255],
+            "size": 15,
+            "x": { "index": 3, "multiplier": 100.0 },
+            "y": { "index": 1, "multiplier": -100.0 },
+            "z": { "index": 2, "multiplier": -100.0 }
+        }
+    ]
+}
