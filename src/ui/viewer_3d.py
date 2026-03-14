@@ -4,6 +4,7 @@ import pyqtgraph.opengl as gl
 import numpy as np
 import json
 import os
+import time
 
 class Config:
     def __init__(self, config_path='config.json'):
@@ -62,6 +63,15 @@ class Viewer3D(gl.GLViewWidget):
         
         # Tracked points
         self.points = {} # Dict to store point items: {name: GLScatterPlotItem}
+        self.point_histories = {}
+        self.point_speeds = {}
+        self.point_times = {}
+        self.point_colors = {}
+        self.path_items = {}
+        self.trail_items = {}
+        self.full_path_mode = False
+        self.trail_mode = False
+        self.trail_length = 120
         
         # State for adaptive scaling
         self.first_point_rendered = False
@@ -191,6 +201,7 @@ class Viewer3D(gl.GLViewWidget):
         # Normalize color if values > 1
         if any(c > 1.0 for c in color):
             color = tuple(c / 255.0 for c in color)
+        self.point_colors[name] = tuple(color)
             
         if name in self.points:
             # Update existing point
@@ -202,6 +213,107 @@ class Viewer3D(gl.GLViewWidget):
             sp.setGLOptions('translucent')
             self.addItem(sp)
             self.points[name] = sp
+        
+        current_time = time.perf_counter()
+        current_pos = np.array([x, y, z], dtype=float)
+        if name not in self.point_histories:
+            self.point_histories[name] = [current_pos]
+            self.point_speeds[name] = [0.0]
+            self.point_times[name] = [current_time]
+        else:
+            last_pos = self.point_histories[name][-1]
+            last_time = self.point_times[name][-1]
+            dt = max(current_time - last_time, 1e-6)
+            speed = float(np.linalg.norm(current_pos - last_pos) / dt)
+            self.point_histories[name].append(current_pos)
+            self.point_speeds[name].append(speed)
+            self.point_times[name].append(current_time)
+        
+        if self.full_path_mode:
+            self.refresh_full_path(name, color)
+        if self.trail_mode:
+            self.refresh_trail(name)
+
+    def set_full_path_mode(self, enabled):
+        self.full_path_mode = bool(enabled)
+        if self.full_path_mode:
+            for name in self.points.keys():
+                path_color = self.point_colors.get(name, (1, 1, 1, 1))
+                self.refresh_full_path(name, path_color)
+        else:
+            for item in self.path_items.values():
+                item.setVisible(False)
+        self.update()
+
+    def set_trail_mode(self, enabled):
+        self.trail_mode = bool(enabled)
+        if self.trail_mode:
+            for name in self.points.keys():
+                self.refresh_trail(name)
+        else:
+            for item in self.trail_items.values():
+                item.setVisible(False)
+        self.update()
+
+    def set_trail_length(self, length):
+        self.trail_length = max(10, int(length))
+        if self.trail_mode:
+            for name in self.points.keys():
+                self.refresh_trail(name)
+            self.update()
+
+    def refresh_full_path(self, name, color):
+        history = self.point_histories.get(name, [])
+        if len(history) < 2:
+            return
+        if name not in self.path_items:
+            path_item = gl.GLLinePlotItem(mode='lines', width=2.0, antialias=True)
+            path_item.setGLOptions('translucent')
+            self.addItem(path_item)
+            self.path_items[name] = path_item
+        rgba = np.array(color, dtype=float)
+        if rgba.shape[0] == 3:
+            rgba = np.append(rgba, 1.0)
+        rgba[3] = 0.8
+        path_pos = np.array(history, dtype=float)
+        segment_pos = np.repeat(path_pos, 2, axis=0)[1:-1]
+        segment_color = np.tile(rgba, (len(segment_pos), 1))
+        self.path_items[name].setData(pos=segment_pos, color=segment_color, mode='lines', width=2.0)
+        self.path_items[name].setVisible(True)
+
+    def refresh_trail(self, name):
+        history = self.point_histories.get(name, [])
+        speeds = self.point_speeds.get(name, [])
+        if len(history) < 2:
+            return
+        if name not in self.trail_items:
+            trail_item = gl.GLLinePlotItem(mode='lines', width=4.0, antialias=True)
+            trail_item.setGLOptions('translucent')
+            self.addItem(trail_item)
+            self.trail_items[name] = trail_item
+        start_idx = max(0, len(history) - self.trail_length)
+        trail_pos = np.array(history[start_idx:], dtype=float)
+        trail_speeds = np.array(speeds[start_idx:], dtype=float)
+        if len(trail_pos) < 2:
+            self.trail_items[name].setVisible(False)
+            return
+        speed_min = float(np.min(trail_speeds))
+        speed_max = float(np.max(trail_speeds))
+        denom = speed_max - speed_min
+        if denom < 1e-6:
+            norm = np.zeros_like(trail_speeds)
+        else:
+            norm = (trail_speeds - speed_min) / denom
+        colors = np.zeros((len(trail_pos), 4), dtype=float)
+        colors[:, 0] = norm
+        colors[:, 1] = 1.0 - np.abs(norm - 0.5) * 1.5
+        colors[:, 1] = np.clip(colors[:, 1], 0.0, 1.0)
+        colors[:, 2] = 1.0 - norm
+        colors[:, 3] = np.linspace(0.2, 1.0, len(trail_pos))
+        segment_pos = np.repeat(trail_pos, 2, axis=0)[1:-1]
+        segment_color = np.repeat(colors, 2, axis=0)[1:-1]
+        self.trail_items[name].setData(pos=segment_pos, color=segment_color, mode='lines', width=4.0)
+        self.trail_items[name].setVisible(True)
             
     def mousePressEvent(self, ev):
         """

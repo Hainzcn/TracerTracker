@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget, QLabel, QHBoxLayout, QSizePolicy, QTextEdit, QCheckBox
+from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget, QLabel, QHBoxLayout, QSizePolicy, QTextEdit, QCheckBox, QSpinBox
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QTextCursor
 from src.ui.viewer_3d import Viewer3D
@@ -83,6 +83,40 @@ class MainWindow(QMainWindow):
         """)
         self.debug_checkbox.stateChanged.connect(self.toggle_debug_console)
         self.status_bar_layout.addWidget(self.debug_checkbox)
+
+        self.full_path_checkbox = QCheckBox("全路径")
+        self.full_path_checkbox.setStyleSheet(self.debug_checkbox.styleSheet())
+        self.full_path_checkbox.stateChanged.connect(self.toggle_full_path_mode)
+        self.status_bar_layout.addSpacing(12)
+        self.status_bar_layout.addWidget(self.full_path_checkbox)
+
+        self.trail_checkbox = QCheckBox("速度尾迹")
+        self.trail_checkbox.setStyleSheet(self.debug_checkbox.styleSheet())
+        self.trail_checkbox.stateChanged.connect(self.toggle_trail_mode)
+        self.status_bar_layout.addSpacing(8)
+        self.status_bar_layout.addWidget(self.trail_checkbox)
+
+        self.trail_length_label = QLabel("长度")
+        self.trail_length_label.setStyleSheet("color: #888;")
+        self.status_bar_layout.addSpacing(4)
+        self.status_bar_layout.addWidget(self.trail_length_label)
+
+        self.trail_length_spinbox = QSpinBox()
+        self.trail_length_spinbox.setRange(10, 5000)
+        self.trail_length_spinbox.setValue(120)
+        self.trail_length_spinbox.setFixedWidth(80)
+        self.trail_length_spinbox.setStyleSheet("""
+            QSpinBox {
+                color: #d4d4d4;
+                background-color: #1e1e1e;
+                border: 1px solid #555;
+                padding: 1px 4px;
+            }
+        """)
+        self.trail_length_spinbox.valueChanged.connect(self.on_trail_length_changed)
+        self.status_bar_layout.addWidget(self.trail_length_spinbox)
+        self.trail_length_spinbox.setEnabled(False)
+        self.trail_length_label.setEnabled(False)
         
         self.layout.addWidget(self.status_bar_widget)
         
@@ -100,6 +134,7 @@ class MainWindow(QMainWindow):
         
         self.last_udp_time = 0
         self.last_serial_time = 0
+        self.viewer.set_trail_length(self.trail_length_spinbox.value())
         
     def toggle_debug_console(self, state):
         """Toggle the visibility of the debug console."""
@@ -108,6 +143,18 @@ class MainWindow(QMainWindow):
         else:
             self.debug_console.hide()
             self.debug_console.clear()
+
+    def toggle_full_path_mode(self, state):
+        self.viewer.set_full_path_mode(state == Qt.Checked)
+
+    def toggle_trail_mode(self, state):
+        enabled = state == Qt.Checked
+        self.viewer.set_trail_mode(enabled)
+        self.trail_length_spinbox.setEnabled(enabled)
+        self.trail_length_label.setEnabled(enabled)
+
+    def on_trail_length_changed(self, value):
+        self.viewer.set_trail_length(value)
 
     def on_data_received(self, source, prefix, data):
         """Handle received data from UDP or Serial."""
