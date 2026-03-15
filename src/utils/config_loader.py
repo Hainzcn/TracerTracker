@@ -17,6 +17,10 @@ class ConfigLoader:
             "port": "COM3",
             "baudrate": 115200,
             "timeout": 1
+        },
+        "render_debug": {
+            "enabled": False,
+            "verbose_point_updates": False
         }
     }
 
@@ -62,3 +66,6 @@ class ConfigLoader:
         
     def get_serial_config(self):
         return self._config.get('serial', self.DEFAULT_CONFIG['serial'])
+
+    def get_render_debug_config(self):
+        return self._config.get('render_debug', self.DEFAULT_CONFIG['render_debug'])

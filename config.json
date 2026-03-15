@@ -10,6 +10,10 @@
         "baudrate": 115200,
         "timeout": 1
     },
+    "render_debug": {
+        "enabled": false,
+        "verbose_point_updates": false
+    },
     "points": [
         {
             "name": "Point 1 (Spiral 1)",

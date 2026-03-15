@@ -72,6 +72,9 @@ class Viewer3D(gl.GLViewWidget):
         self.full_path_mode = False
         self.trail_mode = False
         self.trail_length = 120
+        self.trail_chunk_count = 8
+        self.trail_width_min = 1.3
+        self.trail_width_max = 6.2
         
         # State for adaptive scaling
         self.first_point_rendered = False
@@ -102,6 +105,108 @@ class Viewer3D(gl.GLViewWidget):
         self.animation_duration = 800  # ms
         self.start_state = {}
         self.target_state = {}
+        self.render_debug_enabled = os.getenv("TRACER_RENDER_DEBUG", "0") == "1"
+        self.render_debug_verbose_point_updates = os.getenv("TRACER_RENDER_DEBUG_VERBOSE", "0") == "1"
+
+    def set_render_debug_options(self, enabled=None, verbose_point_updates=None):
+        if enabled is not None:
+            self.render_debug_enabled = bool(enabled)
+        if verbose_point_updates is not None:
+            self.render_debug_verbose_point_updates = bool(verbose_point_updates)
+
+    def _render_debug(self, code, detail, name=None, level="INFO", verbose=False):
+        if not self.render_debug_enabled:
+            return
+        if verbose and not self.render_debug_verbose_point_updates:
+            return
+        point_text = f"[{name}]" if name is not None else "[GLOBAL]"
+        print(f"[Viewer3D][{level}]{point_text}[{code}] {detail}")
+
+    def _create_axis_label(self, text, pos, color):
+        try:
+            label = gl.GLTextItem(pos=np.asarray(pos, dtype=float), text=text, color=color)
+            self.addItem(label)
+            return label
+        except Exception:
+            return None
+
+    def _build_line_segments(self, vertices, colors=None):
+        pts = np.asarray(vertices, dtype=np.float32)
+        if pts.ndim != 2 or pts.shape[1] != 3:
+            return None, None, f"顶点维度无效: shape={getattr(pts, 'shape', None)}"
+        if colors is None:
+            valid_mask = np.isfinite(pts).all(axis=1)
+            pts = pts[valid_mask]
+            if len(pts) < 2:
+                return None, None, f"有效顶点不足: valid_points={len(pts)}"
+            return np.repeat(pts, 2, axis=0)[1:-1], None, None
+        cols = np.asarray(colors, dtype=np.float32)
+        if cols.ndim != 2 or cols.shape[1] != 4 or len(cols) != len(pts):
+            return None, None, f"颜色维度无效: pts_shape={pts.shape}, colors_shape={getattr(cols, 'shape', None)}"
+        valid_mask = np.isfinite(pts).all(axis=1) & np.isfinite(cols).all(axis=1)
+        pts = pts[valid_mask]
+        cols = cols[valid_mask]
+        if len(pts) < 2:
+            return None, None, f"过滤后有效顶点不足: valid_points={len(pts)}"
+        segment_pos = np.repeat(pts, 2, axis=0)[1:-1]
+        segment_color = np.repeat(cols, 2, axis=0)[1:-1]
+        return segment_pos, segment_color, None
+
+    def _normalize_speed_for_trail(self, speeds):
+        values = np.asarray(speeds, dtype=np.float32)
+        if values.size == 0:
+            return values, 0.0, 0.0
+        low = float(np.percentile(values, 15))
+        high = float(np.percentile(values, 85))
+        denom = high - low
+        if denom < 1e-6:
+            low = float(np.min(values))
+            high = float(np.max(values))
+            denom = high - low
+        if denom < 1e-6:
+            return np.zeros_like(values), low, high
+        norm = np.clip((values - low) / denom, 0.0, 1.0)
+        return norm, low, high
+
+    def _speed_to_comet_rgb(self, speed_norm):
+        n = np.clip(speed_norm, 0.0, 1.0)
+        r = 1.0 - 0.95 * n
+        g = 0.1 + 0.9 * n
+        b = 0.06 + 0.14 * (1.0 - np.abs(n - 0.5) * 2.0)
+        rgb = np.stack([r, g, b], axis=1).astype(np.float32)
+        return np.clip(rgb, 0.0, 1.0)
+
+    def _hide_trail_item(self, item):
+        if item is None:
+            return
+        if isinstance(item, dict):
+            for layer_item in item.get('core', []):
+                layer_item.setVisible(False)
+            for layer_item in item.get('glow', []):
+                layer_item.setVisible(False)
+            return
+        item.setVisible(False)
+
+    def _ensure_trail_layers(self, name, layer_count):
+        existing = self.trail_items.get(name)
+        if not isinstance(existing, dict):
+            existing = {'core': [], 'glow': []}
+            self.trail_items[name] = existing
+        core_layers = existing.get('core', [])
+        glow_layers = existing.get('glow', [])
+        existing['core'] = core_layers
+        existing['glow'] = glow_layers
+        while len(core_layers) < layer_count:
+            core_item = gl.GLLinePlotItem(mode='lines', width=2.0, antialias=True)
+            core_item.setGLOptions('translucent')
+            self.addItem(core_item)
+            core_layers.append(core_item)
+        while len(glow_layers) < layer_count:
+            glow_item = gl.GLLinePlotItem(mode='lines', width=3.0, antialias=True)
+            glow_item.setGLOptions('translucent')
+            self.addItem(glow_item)
+            glow_layers.append(glow_item)
+        return core_layers, glow_layers
         
     def add_custom_axes(self):
         """
@@ -120,13 +225,10 @@ class Viewer3D(gl.GLViewWidget):
         self.addItem(self.z_axis)
         
         # Add Text Labels
-        self.x_label = gl.GLTextItem(pos=np.array([20, 0, 0]), text='X', color=(1, 1, 1, 1))
-        self.y_label = gl.GLTextItem(pos=np.array([0, 20, 0]), text='Y', color=(1, 1, 1, 1))
-        self.z_label = gl.GLTextItem(pos=np.array([0, 0, 20]), text='Z', color=(1, 1, 1, 1))
-        
-        self.addItem(self.x_label)
-        self.addItem(self.y_label)
-        self.addItem(self.z_label)
+        label_color = QColor(240, 240, 240, 255)
+        self.x_label = self._create_axis_label('X', [20.0, 0.0, 0.0], label_color)
+        self.y_label = self._create_axis_label('Y', [0.0, 20.0, 0.0], label_color)
+        self.z_label = self._create_axis_label('Z', [0.0, 0.0, 20.0], label_color)
         
         # Initial size
         self.update_axes_size(20)
@@ -144,23 +246,26 @@ class Viewer3D(gl.GLViewWidget):
         pos_ext = size
         
         # X Axis (Red)
-        pos_x = np.array([[neg_ext, 0, 0], [pos_ext, 0, 0]])
+        pos_x = np.array([[neg_ext, 0, 0], [pos_ext, 0, 0]], dtype=np.float32)
         self.x_axis.setData(pos=pos_x, color=(1, 0, 0, 1))
         
         # Y Axis (Green)
-        pos_y = np.array([[0, neg_ext, 0], [0, pos_ext, 0]])
+        pos_y = np.array([[0, neg_ext, 0], [0, pos_ext, 0]], dtype=np.float32)
         self.y_axis.setData(pos=pos_y, color=(0, 1, 0, 1))
         
         # Z Axis (Blue)
-        pos_z = np.array([[0, 0, neg_ext], [0, 0, pos_ext]])
+        pos_z = np.array([[0, 0, neg_ext], [0, 0, pos_ext]], dtype=np.float32)
         self.z_axis.setData(pos=pos_z, color=(0, 0, 1, 1))
         
         # Update Labels Position
         # Offset slightly from the end
         label_offset = size * 1.05 
-        self.x_label.setData(pos=np.array([label_offset, 0, 0]))
-        self.y_label.setData(pos=np.array([0, label_offset, 0]))
-        self.z_label.setData(pos=np.array([0, 0, label_offset]))
+        if self.x_label is not None:
+            self.x_label.setData(pos=np.array([label_offset, 0, 0], dtype=np.float32))
+        if self.y_label is not None:
+            self.y_label.setData(pos=np.array([0, label_offset, 0], dtype=np.float32))
+        if self.z_label is not None:
+            self.z_label.setData(pos=np.array([0, 0, label_offset], dtype=np.float32))
         
         # Update grid size
         if hasattr(self, 'grid'):
@@ -174,7 +279,11 @@ class Viewer3D(gl.GLViewWidget):
         """
         Update or create a tracked point in the 3D view.
         """
-        pos = np.array([[x, y, z]])
+        current_pos = np.array([x, y, z], dtype=float)
+        if not np.isfinite(current_pos).all():
+            self._render_debug("POINT_INVALID_POSITION", f"收到非法坐标: {current_pos.tolist()}", name, "ERROR")
+            return
+        pos = np.array([current_pos], dtype=np.float32)
         
         # Adaptive scaling for the first point
         if not self.first_point_rendered:
@@ -199,27 +308,40 @@ class Viewer3D(gl.GLViewWidget):
         # GLLinePlotItem uses 0-1. GLScatterPlotItem uses 0-1.
         
         # Normalize color if values > 1
-        if any(c > 1.0 for c in color):
-            color = tuple(c / 255.0 for c in color)
-        self.point_colors[name] = tuple(color)
+        color_arr = np.asarray(color, dtype=float).flatten()
+        if color_arr.size == 0:
+            self._render_debug("POINT_EMPTY_COLOR", "颜色为空，已回退到默认红色", name, "WARN")
+            color_arr = np.array([1.0, 0.0, 0.0, 1.0], dtype=float)
+        if color_arr.size == 1:
+            color_arr = np.array([color_arr[0], 0.0, 0.0, 1.0], dtype=float)
+        if color_arr.size == 2:
+            color_arr = np.array([color_arr[0], color_arr[1], 0.0, 1.0], dtype=float)
+        if color_arr.size == 3:
+            color_arr = np.append(color_arr, 1.0)
+        if np.nanmax(color_arr) > 1.0:
+            color_arr = color_arr / 255.0
+        color_arr = np.clip(color_arr[:4], 0.0, 1.0)
+        color_tuple = tuple(float(c) for c in color_arr)
+        self.point_colors[name] = color_tuple
             
         if name in self.points:
             # Update existing point
-            self.points[name].setData(pos=pos, color=color, size=size)
+            self.points[name].setData(pos=pos, color=color_tuple, size=size)
         else:
             # Create new point
             # pxMode=True means size is in pixels, False means world units
-            sp = gl.GLScatterPlotItem(pos=pos, color=color, size=size, pxMode=True)
+            sp = gl.GLScatterPlotItem(pos=pos, color=color_tuple, size=size, pxMode=True)
             sp.setGLOptions('translucent')
             self.addItem(sp)
             self.points[name] = sp
         
         current_time = time.perf_counter()
-        current_pos = np.array([x, y, z], dtype=float)
         if name not in self.point_histories:
             self.point_histories[name] = [current_pos]
             self.point_speeds[name] = [0.0]
             self.point_times[name] = [current_time]
+            if self.full_path_mode or self.trail_mode:
+                self._render_debug("POINT_HISTORY_INIT", "已初始化轨迹历史，当前点数=1", name, verbose=True)
         else:
             last_pos = self.point_histories[name][-1]
             last_time = self.point_times[name][-1]
@@ -228,14 +350,21 @@ class Viewer3D(gl.GLViewWidget):
             self.point_histories[name].append(current_pos)
             self.point_speeds[name].append(speed)
             self.point_times[name].append(current_time)
+            if self.full_path_mode or self.trail_mode:
+                history_len = len(self.point_histories[name])
+                self._render_debug("POINT_HISTORY_APPEND", f"追加轨迹点，当前点数={history_len}，速度={speed:.6f}", name, verbose=True)
         
         if self.full_path_mode:
-            self.refresh_full_path(name, color)
+            self.refresh_full_path(name, color_tuple)
         if self.trail_mode:
             self.refresh_trail(name)
 
     def set_full_path_mode(self, enabled):
-        self.full_path_mode = bool(enabled)
+        target_mode = bool(enabled)
+        if target_mode == self.full_path_mode:
+            return
+        self.full_path_mode = target_mode
+        self._render_debug("MODE_FULL_PATH", f"全路径模式={'开启' if self.full_path_mode else '关闭'}，当前点数量={len(self.points)}")
         if self.full_path_mode:
             for name in self.points.keys():
                 path_color = self.point_colors.get(name, (1, 1, 1, 1))
@@ -246,74 +375,146 @@ class Viewer3D(gl.GLViewWidget):
         self.update()
 
     def set_trail_mode(self, enabled):
-        self.trail_mode = bool(enabled)
+        target_mode = bool(enabled)
+        if target_mode == self.trail_mode:
+            return
+        self.trail_mode = target_mode
+        self._render_debug("MODE_TRAIL", f"速度尾迹模式={'开启' if self.trail_mode else '关闭'}，当前点数量={len(self.points)}")
         if self.trail_mode:
             for name in self.points.keys():
                 self.refresh_trail(name)
         else:
             for item in self.trail_items.values():
-                item.setVisible(False)
+                self._hide_trail_item(item)
         self.update()
 
     def set_trail_length(self, length):
         self.trail_length = max(10, int(length))
+        self._render_debug("TRAIL_LENGTH_UPDATE", f"尾迹长度已更新为 {self.trail_length}")
         if self.trail_mode:
             for name in self.points.keys():
                 self.refresh_trail(name)
             self.update()
 
     def refresh_full_path(self, name, color):
-        history = self.point_histories.get(name, [])
-        if len(history) < 2:
-            return
-        if name not in self.path_items:
-            path_item = gl.GLLinePlotItem(mode='lines', width=2.0, antialias=True)
-            path_item.setGLOptions('translucent')
-            self.addItem(path_item)
-            self.path_items[name] = path_item
-        rgba = np.array(color, dtype=float)
-        if rgba.shape[0] == 3:
-            rgba = np.append(rgba, 1.0)
-        rgba[3] = 0.8
-        path_pos = np.array(history, dtype=float)
-        segment_pos = np.repeat(path_pos, 2, axis=0)[1:-1]
-        segment_color = np.tile(rgba, (len(segment_pos), 1))
-        self.path_items[name].setData(pos=segment_pos, color=segment_color, mode='lines', width=2.0)
-        self.path_items[name].setVisible(True)
+        try:
+            history = self.point_histories.get(name, [])
+            if len(history) < 2:
+                self._render_debug("PATH_SKIPPED_NOT_ENOUGH_POINTS", f"轨迹点不足，history_len={len(history)}", name, "WARN")
+                if name in self.path_items:
+                    self.path_items[name].setVisible(False)
+                return
+            if name not in self.path_items:
+                path_item = gl.GLLinePlotItem(mode='lines', width=2.0, antialias=True)
+                path_item.setGLOptions('translucent')
+                self.addItem(path_item)
+                self.path_items[name] = path_item
+                self._render_debug("PATH_ITEM_CREATED", "已创建全路径绘制对象", name)
+            rgba = np.array(color, dtype=np.float32)
+            if rgba.shape[0] == 3:
+                rgba = np.append(rgba, 1.0)
+            rgba[3] = 0.8
+            path_pos = np.array(history, dtype=np.float32)
+            segment_pos, _, reason = self._build_line_segments(path_pos)
+            if segment_pos is None:
+                self._render_debug("PATH_SEGMENT_BUILD_FAILED", reason or "未知原因", name, "ERROR")
+                self.path_items[name].setVisible(False)
+                return
+            segment_color = np.tile(rgba, (len(segment_pos), 1))
+            self.path_items[name].setData(pos=segment_pos, color=segment_color, mode='lines', width=2.0)
+            self.path_items[name].setVisible(True)
+            self._render_debug("PATH_RENDER_OK", f"全路径渲染成功，segment_count={len(segment_pos)}", name)
+            self.update()
+        except Exception as exc:
+            self._render_debug("PATH_RENDER_EXCEPTION", f"{type(exc).__name__}: {exc}", name, "ERROR")
+            if name in self.path_items:
+                self.path_items[name].setVisible(False)
 
     def refresh_trail(self, name):
-        history = self.point_histories.get(name, [])
-        speeds = self.point_speeds.get(name, [])
-        if len(history) < 2:
-            return
-        if name not in self.trail_items:
-            trail_item = gl.GLLinePlotItem(mode='lines', width=4.0, antialias=True)
-            trail_item.setGLOptions('translucent')
-            self.addItem(trail_item)
-            self.trail_items[name] = trail_item
-        start_idx = max(0, len(history) - self.trail_length)
-        trail_pos = np.array(history[start_idx:], dtype=float)
-        trail_speeds = np.array(speeds[start_idx:], dtype=float)
-        if len(trail_pos) < 2:
-            self.trail_items[name].setVisible(False)
-            return
-        speed_min = float(np.min(trail_speeds))
-        speed_max = float(np.max(trail_speeds))
-        denom = speed_max - speed_min
-        if denom < 1e-6:
-            norm = np.zeros_like(trail_speeds)
-        else:
-            norm = (trail_speeds - speed_min) / denom
-        colors = np.zeros((len(trail_pos), 4), dtype=float)
-        colors[:, 0] = norm
-        colors[:, 1] = 1.0 - np.abs(norm - 0.5) * 1.5
-        colors[:, 1] = np.clip(colors[:, 1], 0.0, 1.0)
-        colors[:, 2] = 1.0 - norm
-        colors[:, 3] = np.linspace(0.2, 1.0, len(trail_pos))
-        segment_pos = np.repeat(trail_pos, 2, axis=0)[1:-1]
-        segment_color = np.repeat(colors, 2, axis=0)[1:-1]
-        self.trail_items[name].setData(pos=segment_pos, color=segment_color, mode='lines', width=4.0)
-        self.trail_items[name].setVisible(True)
+        try:
+            history = self.point_histories.get(name, [])
+            speeds = self.point_speeds.get(name, [])
+            if len(history) < 2:
+                self._render_debug("TRAIL_SKIPPED_NOT_ENOUGH_POINTS", f"轨迹点不足，history_len={len(history)}", name, "WARN")
+                if name in self.trail_items:
+                    self._hide_trail_item(self.trail_items[name])
+                return
+            start_idx = max(0, len(history) - self.trail_length)
+            trail_pos = np.array(history[start_idx:], dtype=np.float32)
+            trail_speeds = np.array(speeds[start_idx:], dtype=np.float32)
+            finite_mask = np.isfinite(trail_pos).all(axis=1) & np.isfinite(trail_speeds)
+            filtered_out = int(len(trail_pos) - int(np.sum(finite_mask)))
+            if filtered_out > 0:
+                self._render_debug("TRAIL_FILTERED_NONFINITE", f"已过滤非法样本={filtered_out}", name, "WARN")
+            trail_pos = trail_pos[finite_mask]
+            trail_speeds = trail_speeds[finite_mask]
+            if len(trail_pos) < 2:
+                self._render_debug("TRAIL_SKIPPED_AFTER_FILTER", f"过滤后点不足，valid_len={len(trail_pos)}", name, "WARN")
+                if name in self.trail_items:
+                    self._hide_trail_item(self.trail_items[name])
+                return
+            norm, speed_low, speed_high = self._normalize_speed_for_trail(trail_speeds)
+            if speed_high - speed_low < 1e-6:
+                self._render_debug("TRAIL_SPEED_FLAT", f"速度近似恒定，low={speed_low:.6f}, high={speed_high:.6f}", name, "WARN")
+            ages = np.linspace(0.0, 1.0, len(trail_pos), dtype=np.float32)
+            colors = np.zeros((len(trail_pos), 4), dtype=np.float32)
+            colors[:, :3] = self._speed_to_comet_rgb(norm)
+            colors[:, 3] = np.clip(0.06 + np.power(ages, 1.8) * 0.9, 0.0, 1.0)
+            segment_total = len(trail_pos) - 1
+            layer_count = int(min(self.trail_chunk_count, max(1, segment_total)))
+            edge_idx = np.linspace(0, len(trail_pos) - 1, layer_count + 1, dtype=int)
+            existing_layer_count = 0
+            if isinstance(self.trail_items.get(name), dict):
+                existing_layer_count = len(self.trail_items[name].get('core', []))
+            core_layers, glow_layers = self._ensure_trail_layers(name, layer_count)
+            if len(core_layers) > existing_layer_count:
+                self._render_debug("TRAIL_ITEM_CREATED", f"已创建彗星彩色尾迹图层，layer_count={len(core_layers)}", name)
+            for layer_item in core_layers:
+                layer_item.setVisible(False)
+            for layer_item in glow_layers:
+                layer_item.setVisible(False)
+            rendered_layers = 0
+            rendered_segments = 0
+            for layer_idx in range(layer_count):
+                i0 = int(edge_idx[layer_idx])
+                i1 = int(edge_idx[layer_idx + 1])
+                if i1 <= i0:
+                    continue
+                layer_pos = trail_pos[i0:i1 + 1]
+                layer_color = colors[i0:i1 + 1]
+                segment_pos, segment_color, reason = self._build_line_segments(layer_pos, layer_color)
+                if segment_pos is None or segment_color is None:
+                    core_layers[layer_idx].setVisible(False)
+                    glow_layers[layer_idx].setVisible(False)
+                    self._render_debug("TRAIL_SEGMENT_BUILD_FAILED", reason or "未知原因", name, "ERROR")
+                    continue
+                age_mid = float((i0 + i1) / max(2, 2 * (len(trail_pos) - 1)))
+                speed_mid = float(np.mean(norm[i0:i1 + 1]))
+                width_ratio = 0.45 * age_mid + 0.55 * speed_mid
+                core_width = self.trail_width_min + (self.trail_width_max - self.trail_width_min) * width_ratio
+                glow_width = core_width * 2.2
+                glow_color = segment_color.copy()
+                glow_color[:, 3] = np.clip(glow_color[:, 3] * 0.28, 0.0, 1.0)
+                core_layers[layer_idx].setData(pos=segment_pos, color=segment_color, mode='lines', width=core_width)
+                glow_layers[layer_idx].setData(pos=segment_pos, color=glow_color, mode='lines', width=glow_width)
+                core_layers[layer_idx].setVisible(True)
+                glow_layers[layer_idx].setVisible(True)
+                rendered_layers += 1
+                rendered_segments += len(segment_pos)
+            if rendered_layers == 0:
+                self._render_debug("TRAIL_SEGMENT_BUILD_FAILED", "所有分层片段均构建失败", name, "ERROR")
+                self._hide_trail_item(self.trail_items[name])
+                return
+            self._render_debug(
+                "TRAIL_RENDER_OK",
+                f"彗星彩色尾迹渲染成功，layers={rendered_layers}，segment_count={rendered_segments}，speed_low={speed_low:.4f}，speed_high={speed_high:.4f}",
+                name
+            )
+            self.update()
+        except Exception as exc:
+            self._render_debug("TRAIL_RENDER_EXCEPTION", f"{type(exc).__name__}: {exc}", name, "ERROR")
+            if name in self.trail_items:
+                self._hide_trail_item(self.trail_items[name])
             
     def mousePressEvent(self, ev):
         """

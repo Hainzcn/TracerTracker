@@ -29,6 +29,11 @@ class MainWindow(QMainWindow):
         self.viewer = Viewer3D()
         self.viewer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.layout.addWidget(self.viewer, 1) # Add stretch factor 1 to take available space
+        render_debug_cfg = self.config_loader.get_render_debug_config()
+        self.viewer.set_render_debug_options(
+            enabled=render_debug_cfg.get("enabled", False),
+            verbose_point_updates=render_debug_cfg.get("verbose_point_updates", False)
+        )
         
         # Debug Console (Hidden by default)
         self.debug_console = QTextEdit()
@@ -86,13 +91,13 @@ class MainWindow(QMainWindow):
 
         self.full_path_checkbox = QCheckBox("全路径")
         self.full_path_checkbox.setStyleSheet(self.debug_checkbox.styleSheet())
-        self.full_path_checkbox.stateChanged.connect(self.toggle_full_path_mode)
+        self.full_path_checkbox.toggled.connect(self.toggle_full_path_mode)
         self.status_bar_layout.addSpacing(12)
         self.status_bar_layout.addWidget(self.full_path_checkbox)
 
         self.trail_checkbox = QCheckBox("速度尾迹")
         self.trail_checkbox.setStyleSheet(self.debug_checkbox.styleSheet())
-        self.trail_checkbox.stateChanged.connect(self.toggle_trail_mode)
+        self.trail_checkbox.toggled.connect(self.toggle_trail_mode)
         self.status_bar_layout.addSpacing(8)
         self.status_bar_layout.addWidget(self.trail_checkbox)
 
@@ -144,14 +149,13 @@ class MainWindow(QMainWindow):
             self.debug_console.hide()
             self.debug_console.clear()
 
-    def toggle_full_path_mode(self, state):
-        self.viewer.set_full_path_mode(state == Qt.Checked)
+    def toggle_full_path_mode(self, checked):
+        self.viewer.set_full_path_mode(checked)
 
-    def toggle_trail_mode(self, state):
-        enabled = state == Qt.Checked
-        self.viewer.set_trail_mode(enabled)
-        self.trail_length_spinbox.setEnabled(enabled)
-        self.trail_length_label.setEnabled(enabled)
+    def toggle_trail_mode(self, checked):
+        self.viewer.set_trail_mode(checked)
+        self.trail_length_spinbox.setEnabled(checked)
+        self.trail_length_label.setEnabled(checked)
 
     def on_trail_length_changed(self, value):
         self.viewer.set_trail_length(value)
