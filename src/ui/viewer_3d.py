@@ -72,9 +72,8 @@ class Viewer3D(gl.GLViewWidget):
         self.full_path_mode = False
         self.trail_mode = False
         self.trail_length = 120
-        self.trail_chunk_count = 8
-        self.trail_width_min = 1.3
-        self.trail_width_max = 6.2
+        self.trail_width_min = 2.4
+        self.trail_width_max = 6.0
         
         # State for adaptive scaling
         self.first_point_rendered = False
@@ -186,27 +185,6 @@ class Viewer3D(gl.GLViewWidget):
                 layer_item.setVisible(False)
             return
         item.setVisible(False)
-
-    def _ensure_trail_layers(self, name, layer_count):
-        existing = self.trail_items.get(name)
-        if not isinstance(existing, dict):
-            existing = {'core': [], 'glow': []}
-            self.trail_items[name] = existing
-        core_layers = existing.get('core', [])
-        glow_layers = existing.get('glow', [])
-        existing['core'] = core_layers
-        existing['glow'] = glow_layers
-        while len(core_layers) < layer_count:
-            core_item = gl.GLLinePlotItem(mode='lines', width=2.0, antialias=True)
-            core_item.setGLOptions('translucent')
-            self.addItem(core_item)
-            core_layers.append(core_item)
-        while len(glow_layers) < layer_count:
-            glow_item = gl.GLLinePlotItem(mode='lines', width=3.0, antialias=True)
-            glow_item.setGLOptions('translucent')
-            self.addItem(glow_item)
-            glow_layers.append(glow_item)
-        return core_layers, glow_layers
         
     def add_custom_axes(self):
         """
@@ -459,55 +437,31 @@ class Viewer3D(gl.GLViewWidget):
             ages = np.linspace(0.0, 1.0, len(trail_pos), dtype=np.float32)
             colors = np.zeros((len(trail_pos), 4), dtype=np.float32)
             colors[:, :3] = self._speed_to_comet_rgb(norm)
-            colors[:, 3] = np.clip(0.06 + np.power(ages, 1.8) * 0.9, 0.0, 1.0)
-            segment_total = len(trail_pos) - 1
-            layer_count = int(min(self.trail_chunk_count, max(1, segment_total)))
-            edge_idx = np.linspace(0, len(trail_pos) - 1, layer_count + 1, dtype=int)
-            existing_layer_count = 0
-            if isinstance(self.trail_items.get(name), dict):
-                existing_layer_count = len(self.trail_items[name].get('core', []))
-            core_layers, glow_layers = self._ensure_trail_layers(name, layer_count)
-            if len(core_layers) > existing_layer_count:
-                self._render_debug("TRAIL_ITEM_CREATED", f"已创建彗星彩色尾迹图层，layer_count={len(core_layers)}", name)
-            for layer_item in core_layers:
-                layer_item.setVisible(False)
-            for layer_item in glow_layers:
-                layer_item.setVisible(False)
-            rendered_layers = 0
-            rendered_segments = 0
-            for layer_idx in range(layer_count):
-                i0 = int(edge_idx[layer_idx])
-                i1 = int(edge_idx[layer_idx + 1])
-                if i1 <= i0:
-                    continue
-                layer_pos = trail_pos[i0:i1 + 1]
-                layer_color = colors[i0:i1 + 1]
-                segment_pos, segment_color, reason = self._build_line_segments(layer_pos, layer_color)
-                if segment_pos is None or segment_color is None:
-                    core_layers[layer_idx].setVisible(False)
-                    glow_layers[layer_idx].setVisible(False)
-                    self._render_debug("TRAIL_SEGMENT_BUILD_FAILED", reason or "未知原因", name, "ERROR")
-                    continue
-                age_mid = float((i0 + i1) / max(2, 2 * (len(trail_pos) - 1)))
-                speed_mid = float(np.mean(norm[i0:i1 + 1]))
-                width_ratio = 0.45 * age_mid + 0.55 * speed_mid
-                core_width = self.trail_width_min + (self.trail_width_max - self.trail_width_min) * width_ratio
-                glow_width = core_width * 2.2
-                glow_color = segment_color.copy()
-                glow_color[:, 3] = np.clip(glow_color[:, 3] * 0.28, 0.0, 1.0)
-                core_layers[layer_idx].setData(pos=segment_pos, color=segment_color, mode='lines', width=core_width)
-                glow_layers[layer_idx].setData(pos=segment_pos, color=glow_color, mode='lines', width=glow_width)
-                core_layers[layer_idx].setVisible(True)
-                glow_layers[layer_idx].setVisible(True)
-                rendered_layers += 1
-                rendered_segments += len(segment_pos)
-            if rendered_layers == 0:
-                self._render_debug("TRAIL_SEGMENT_BUILD_FAILED", "所有分层片段均构建失败", name, "ERROR")
-                self._hide_trail_item(self.trail_items[name])
+            colors[:, 3] = np.linspace(0.12, 0.95, len(trail_pos), dtype=np.float32)
+            segment_pos, segment_color, reason = self._build_line_segments(trail_pos, colors)
+            if segment_pos is None or segment_color is None:
+                self._render_debug("TRAIL_SEGMENT_BUILD_FAILED", reason or "未知原因", name, "ERROR")
+                if name in self.trail_items:
+                    self._hide_trail_item(self.trail_items[name])
                 return
+            trail_item = self.trail_items.get(name)
+            if isinstance(trail_item, dict):
+                self._hide_trail_item(trail_item)
+                trail_item = None
+            if trail_item is None:
+                trail_item = gl.GLLinePlotItem(mode='lines', width=4.0, antialias=True)
+                trail_item.setGLOptions('translucent')
+                self.addItem(trail_item)
+                self.trail_items[name] = trail_item
+                self._render_debug("TRAIL_ITEM_CREATED", "已创建连续尾迹绘制对象", name)
+            speed_head = float(np.mean(norm[-min(5, len(norm)):])) if len(norm) > 0 else 0.0
+            width_ratio = 0.25 + 0.75 * speed_head
+            trail_width = self.trail_width_min + (self.trail_width_max - self.trail_width_min) * width_ratio
+            trail_item.setData(pos=segment_pos, color=segment_color, mode='lines', width=trail_width)
+            trail_item.setVisible(True)
             self._render_debug(
                 "TRAIL_RENDER_OK",
-                f"彗星彩色尾迹渲染成功，layers={rendered_layers}，segment_count={rendered_segments}，speed_low={speed_low:.4f}，speed_high={speed_high:.4f}",
+                f"连续尾迹渲染成功，segment_count={len(segment_pos)}，trail_len={len(trail_pos)}，width={trail_width:.2f}，speed_low={speed_low:.4f}，speed_high={speed_high:.4f}",
                 name
             )
             self.update()
