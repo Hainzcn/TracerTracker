@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, QPoint, QTimer, QTime
+from PySide6.QtCore import Qt, QPoint, QTimer, QTime, Signal
 from PySide6.QtGui import QVector3D, QColor, QMatrix4x4
 import pyqtgraph.opengl as gl
 import numpy as np
@@ -30,6 +30,9 @@ class Viewer3D(gl.GLViewWidget):
     - Middle Click: Reset View (Animated)
     - Scroll Wheel: Zoom
     """
+    # Signal emitted for debug logging
+    log_message = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         
@@ -119,7 +122,9 @@ class Viewer3D(gl.GLViewWidget):
         if verbose and not self.render_debug_verbose_point_updates:
             return
         point_text = f"[{name}]" if name is not None else "[GLOBAL]"
-        print(f"[Viewer3D][{level}]{point_text}[{code}] {detail}")
+        msg = f"[Viewer3D][{level}]{point_text}[{code}] {detail}"
+        print(msg)
+        self.log_message.emit(msg)
 
     def _create_axis_label(self, text, pos, color):
         try:
@@ -354,10 +359,20 @@ class Viewer3D(gl.GLViewWidget):
 
     def set_trail_mode(self, enabled):
         target_mode = bool(enabled)
+        # Always log even if mode hasn't changed, or at least when it is triggered by UI
+        # But to match user request "send in window", we just ensure _render_debug emits.
+        # The user specifically mentioned lines 360 and 371.
+        
         if target_mode == self.trail_mode:
-            return
+            # If user clicks the checkbox, it might toggle even if internal state thinks it is same? 
+            # No, QCheckBox won't emit if state is same.
+            # But let's allow re-logging if useful. 
+            pass
+            
         self.trail_mode = target_mode
-        self._render_debug("MODE_TRAIL", f"速度尾迹模式={'开启' if self.trail_mode else '关闭'}，当前点数量={len(self.points)}")
+        # Force emit log
+        self.log_message.emit(f"[Viewer3D][INFO][GLOBAL][MODE_TRAIL] 速度尾迹模式={'开启' if self.trail_mode else '关闭'}，当前点数量={len(self.points)}")
+        
         if self.trail_mode:
             for name in self.points.keys():
                 self.refresh_trail(name)
@@ -368,7 +383,9 @@ class Viewer3D(gl.GLViewWidget):
 
     def set_trail_length(self, length):
         self.trail_length = max(10, int(length))
-        self._render_debug("TRAIL_LENGTH_UPDATE", f"尾迹长度已更新为 {self.trail_length}")
+        # Force emit log
+        self.log_message.emit(f"[Viewer3D][INFO][GLOBAL][TRAIL_LENGTH_UPDATE] 尾迹长度已更新为 {self.trail_length}")
+        
         if self.trail_mode:
             for name in self.points.keys():
                 self.refresh_trail(name)

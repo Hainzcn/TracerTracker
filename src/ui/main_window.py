@@ -1,9 +1,10 @@
-from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget, QLabel, QHBoxLayout, QSizePolicy, QTextEdit, QCheckBox, QSpinBox
+from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget, QLabel, QHBoxLayout, QSizePolicy, QTextEdit, QCheckBox, QSpinBox, QSplitter, QPushButton
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QTextCursor
 from src.ui.viewer_3d import Viewer3D
 from src.utils.config_loader import ConfigLoader
 from src.utils.data_receiver import DataReceiver
+from src.utils.pose_processor import PoseProcessor
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -16,7 +17,13 @@ class MainWindow(QMainWindow):
         self.config_loader = ConfigLoader()
         self.data_receiver = DataReceiver(self.config_loader)
         self.data_receiver.data_received.connect(self.on_data_received)
+        self.data_receiver.raw_data_received.connect(self.on_raw_data_received)
         self.data_receiver.start()
+        
+        # Initialize Pose Processor
+        self.pose_processor = PoseProcessor(self.config_loader)
+        self.pose_processor.position_updated.connect(self.on_pose_updated)
+        self.pose_processor.log_message.connect(self.on_pose_log)
         
         # Central widget and layout
         self.central_widget = QWidget()
@@ -28,6 +35,7 @@ class MainWindow(QMainWindow):
         # Add 3D Viewer
         self.viewer = Viewer3D()
         self.viewer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.viewer.log_message.connect(self.on_pose_log) # Reuse the same log handler
         self.layout.addWidget(self.viewer, 1) # Add stretch factor 1 to take available space
         render_debug_cfg = self.config_loader.get_render_debug_config()
         self.viewer.set_render_debug_options(
@@ -35,21 +43,40 @@ class MainWindow(QMainWindow):
             verbose_point_updates=render_debug_cfg.get("verbose_point_updates", False)
         )
         
-        # Debug Console (Hidden by default)
-        self.debug_console = QTextEdit()
-        self.debug_console.setReadOnly(True)
-        self.debug_console.setFixedHeight(150)
-        self.debug_console.setStyleSheet("""
+        # Debug Console Area (Hidden by default)
+        self.debug_splitter = QSplitter(Qt.Horizontal)
+        self.debug_splitter.setFixedHeight(200)
+        self.debug_splitter.hide()
+        
+        # Common Style for Consoles
+        console_style = """
             QTextEdit {
                 background-color: #1e1e1e;
                 color: #d4d4d4;
-                border-top: 1px solid #333;
+                border: 1px solid #333;
                 font-family: Consolas, monospace;
-                font-size: 12px;
+                font-size: 11px;
             }
-        """)
-        self.debug_console.hide()
-        self.layout.addWidget(self.debug_console)
+        """
+        
+        # Left Console: Raw Data
+        self.raw_data_console = QTextEdit()
+        self.raw_data_console.setReadOnly(True)
+        self.raw_data_console.setPlaceholderText("Raw Data Log...")
+        self.raw_data_console.setStyleSheet(console_style)
+        
+        # Right Console: Debug Info
+        self.debug_info_console = QTextEdit()
+        self.debug_info_console.setReadOnly(True)
+        self.debug_info_console.setPlaceholderText("Debug Info & Pose Processing Log...")
+        self.debug_info_console.setStyleSheet(console_style)
+        
+        self.debug_splitter.addWidget(self.raw_data_console)
+        self.debug_splitter.addWidget(self.debug_info_console)
+        # Set initial sizes (50/50)
+        self.debug_splitter.setSizes([640, 640])
+        
+        self.layout.addWidget(self.debug_splitter)
         
         # Status Bar Area (Custom Overlay or Bottom Bar)
         self.status_bar_widget = QWidget()
@@ -57,6 +84,29 @@ class MainWindow(QMainWindow):
         self.status_bar_layout.setContentsMargins(10, 5, 10, 5)
         self.status_bar_widget.setStyleSheet("background-color: #252526; border-top: 1px solid #333;")
         self.status_bar_widget.setFixedHeight(30) # Fixed height for status bar
+        
+        # Hold to View Parsed Button (Moved to Status Bar)
+        self.parsed_view_btn = QPushButton("按住查看解析数据")
+        self.parsed_view_btn.setFixedWidth(120)
+        self.parsed_view_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #333;
+                color: #ccc;
+                border: 1px solid #555;
+                padding: 2px 4px;
+                font-size: 11px;
+                border-radius: 2px;
+            }
+            QPushButton:pressed {
+                background-color: #555;
+            }
+        """)
+        self.parsed_view_btn.pressed.connect(self.enable_parse_view)
+        self.parsed_view_btn.released.connect(self.disable_parse_view)
+        self.show_parsed_data = False
+        
+        self.status_bar_layout.addWidget(self.parsed_view_btn)
+        self.status_bar_layout.addSpacing(10)
         
         # Status Labels
         self.udp_status_label = QLabel("UDP: Idle")
@@ -144,10 +194,11 @@ class MainWindow(QMainWindow):
     def toggle_debug_console(self, state):
         """Toggle the visibility of the debug console."""
         if state:
-            self.debug_console.show()
+            self.debug_splitter.show()
         else:
-            self.debug_console.hide()
-            self.debug_console.clear()
+            self.debug_splitter.hide()
+            self.raw_data_console.clear()
+            self.debug_info_console.clear()
 
     def toggle_full_path_mode(self, checked):
         self.viewer.set_full_path_mode(checked)
@@ -160,22 +211,99 @@ class MainWindow(QMainWindow):
     def on_trail_length_changed(self, value):
         self.viewer.set_trail_length(value)
 
+    def enable_parse_view(self):
+        self.show_parsed_data = True
+        
+    def disable_parse_view(self):
+        self.show_parsed_data = False
+
+    def format_parsed_data(self, prefix, data):
+        """
+        Format parsed data into a readable string with labels from config.
+        """
+        points_config = self.config_loader.get("points", [])
+        formatted_parts = []
+        
+        # Helper to format a single point config
+        def format_point(cfg, values):
+            try:
+                name = cfg.get("name", "Unknown")
+                x_idx = cfg.get("x", {}).get("index", -1)
+                y_idx = cfg.get("y", {}).get("index", -1)
+                z_idx = cfg.get("z", {}).get("index", -1)
+                
+                parts = []
+                # Use raw index access, multipliers are handled in viewer/pose_processor, 
+                # here we just show what indices mean.
+                if 0 <= x_idx < len(values): parts.append(f"X:{values[x_idx]:.2f}")
+                if 0 <= y_idx < len(values): parts.append(f"Y:{values[y_idx]:.2f}")
+                if 0 <= z_idx < len(values): parts.append(f"Z:{values[z_idx]:.2f}")
+                
+                if parts:
+                    return f"{name}({', '.join(parts)})"
+            except:
+                pass
+            return None
+
+        # Iterate config to find matching points
+        for p in points_config:
+            # Check prefix match
+            p_prefix = p.get("prefix")
+            if p_prefix == "": p_prefix = None
+            
+            # If both are None or match
+            if p_prefix == prefix:
+                res = format_point(p, data)
+                if res:
+                    formatted_parts.append(res)
+        
+        # If no config matched or partial match, also show raw list
+        if formatted_parts:
+            return " | ".join(formatted_parts)
+        else:
+            # Fallback to simple list display
+            return f"List: {data}"
+
+    def on_pose_updated(self, name, x, y, z):
+        """Handle position updates from PoseProcessor."""
+        # Cyan color for the computed path
+        self.viewer.update_point(name, x, y, z, color=[0, 255, 255, 255], size=15)
+        
+    def on_pose_log(self, message):
+        """Handle log messages from PoseProcessor."""
+        if self.debug_splitter.isVisible():
+            self.debug_info_console.moveCursor(QTextCursor.End)
+            self.debug_info_console.insertPlainText(message + "\n")
+            self.debug_info_console.moveCursor(QTextCursor.End)
+
+    def on_raw_data_received(self, source, raw_text):
+        """Handle raw data log."""
+        if self.debug_splitter.isVisible() and not self.show_parsed_data:
+            import time
+            timestamp = time.strftime("%H:%M:%S", time.localtime(time.time()))
+            log_msg = f"[{timestamp}] [{source.upper()}] {raw_text}"
+            
+            self.raw_data_console.moveCursor(QTextCursor.End)
+            self.raw_data_console.insertPlainText(log_msg + "\n")
+            self.raw_data_console.moveCursor(QTextCursor.End)
+
     def on_data_received(self, source, prefix, data):
         """Handle received data from UDP or Serial."""
         import time
         current_time = time.time()
         
-        # Debug Output
-        if self.debug_console.isVisible():
+        # If in parsed view mode, log parsed data
+        if self.debug_splitter.isVisible() and self.show_parsed_data:
             timestamp = time.strftime("%H:%M:%S", time.localtime(current_time))
-            # Format data list to string
-            data_str = ", ".join([f"{x:.2f}" for x in data])
-            prefix_str = f"[{prefix}] " if prefix else ""
-            log_msg = f"[{timestamp}] [{source.upper()}] {prefix_str}{data_str}"
+            parsed_str = self.format_parsed_data(prefix, data)
+            log_msg = f"[{timestamp}] [{source.upper()}] [PARSED] {parsed_str}"
             
-            self.debug_console.moveCursor(QTextCursor.End)
-            self.debug_console.insertPlainText(log_msg + "\n")
-            self.debug_console.moveCursor(QTextCursor.End)
+            self.raw_data_console.moveCursor(QTextCursor.End)
+            self.raw_data_console.insertPlainText(log_msg + "\n")
+            self.raw_data_console.moveCursor(QTextCursor.End)
+
+        # Process data for pose estimation
+        self.pose_processor.process(source, prefix, data)
         
         # Update status indicators
         status_text = f"Receiving ({len(data)} values)"
@@ -194,6 +322,10 @@ class MainWindow(QMainWindow):
         points_config = self.config_loader.get("points", [])
         
         for point_cfg in points_config:
+            # Skip special purpose points (they are handled by PoseProcessor)
+            if point_cfg.get("purpose") in ["accelerometer", "gyroscope", "magnetic_field"]:
+                continue
+
             # Check if this config applies to the current source
             cfg_source = point_cfg.get("source", "any")
             

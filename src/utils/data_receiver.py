@@ -10,6 +10,8 @@ class DataReceiver(QObject):
     Emits 'data_received' signal with (source, prefix, parsed_data).
     """
     data_received = Signal(str, str, list)
+    # Emits raw data: (source, raw_string)
+    raw_data_received = Signal(str, str)
     
     def __init__(self, config_loader):
         super().__init__()
@@ -102,6 +104,15 @@ class DataReceiver(QObject):
             while self.running:
                 try:
                     data, addr = self.udp_socket.recvfrom(4096) # Increased buffer size
+                    
+                    # Decode and emit raw data
+                    try:
+                        raw_text = data.decode('utf-8').strip()
+                        if raw_text:
+                            self.raw_data_received.emit("udp", raw_text)
+                    except Exception:
+                        pass # Ignore decode errors for raw log or handle differently
+                        
                     result = self._parse_data(data)
                     if result:
                         prefix, parsed = result
@@ -134,6 +145,15 @@ class DataReceiver(QObject):
                     try:
                         if self.serial_port.in_waiting > 0:
                             line = self.serial_port.readline()
+                            
+                            # Decode and emit raw data
+                            try:
+                                raw_text = line.decode('utf-8').strip()
+                                if raw_text:
+                                    self.raw_data_received.emit("serial", raw_text)
+                            except Exception:
+                                pass
+                                
                             result = self._parse_data(line)
                             if result:
                                 prefix, parsed = result
