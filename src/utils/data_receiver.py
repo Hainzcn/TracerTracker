@@ -78,8 +78,15 @@ class DataReceiver(QObject):
             # Check for prefix (e.g. "G:...")
             if ':' in text:
                 parts = text.split(':', 1)
-                prefix = parts[0].strip()
+                prefix_candidate = parts[0].strip()
+                # Treat empty string prefix as None
+                if prefix_candidate:
+                    prefix = prefix_candidate
+                else:
+                    prefix = None
                 csv_part = parts[1].strip()
+            else:
+                prefix = None # Explicitly set None if no colon found
                 
             # Parse CSV
             if not csv_part:

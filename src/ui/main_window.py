@@ -24,6 +24,7 @@ class MainWindow(QMainWindow):
         self.pose_processor = PoseProcessor(self.config_loader)
         self.pose_processor.position_updated.connect(self.on_pose_updated)
         self.pose_processor.log_message.connect(self.on_pose_log)
+        self.pose_processor.parsed_data_updated.connect(self.on_parsed_data_updated)
         
         # Central widget and layout
         self.central_widget = QWidget()
@@ -64,6 +65,50 @@ class MainWindow(QMainWindow):
         self.raw_data_console.setReadOnly(True)
         self.raw_data_console.setPlaceholderText("Raw Data Log...")
         self.raw_data_console.setStyleSheet(console_style)
+
+        # Container for Left Console + Overlay Button
+        self.left_console_container = QWidget()
+        self.left_console_layout = QVBoxLayout(self.left_console_container)
+        self.left_console_layout.setContentsMargins(0, 0, 0, 0)
+        self.left_console_layout.setSpacing(0)
+        
+        # Top Bar for Left Console (Button Area)
+        self.left_console_top_bar = QWidget()
+        self.left_console_top_bar.setStyleSheet("background-color: transparent;")
+        self.left_console_top_layout = QHBoxLayout(self.left_console_top_bar)
+        self.left_console_top_layout.setContentsMargins(5, 5, 5, 0)
+        
+        # Toggle Parsed View Checkbox
+        self.parsed_view_checkbox = QCheckBox("解析视图")
+        self.parsed_view_checkbox.setStyleSheet("""
+            QCheckBox {
+                color: #888;
+                padding-left: 5px;
+            }
+            QCheckBox::indicator {
+                width: 13px;
+                height: 13px;
+                border: 1px solid #555;
+                background: #1e1e1e;
+            }
+            QCheckBox::indicator:checked {
+                background: #4CAF50;
+                border: 1px solid #4CAF50;
+            }
+        """)
+        self.parsed_view_checkbox.stateChanged.connect(self.toggle_parse_view)
+        self.show_parsed_data = False
+        
+        self.left_console_top_layout.addWidget(self.parsed_view_checkbox)
+        self.left_console_top_layout.addStretch()
+        
+        # Add bar and console to container. 
+        # Note: To make button overlay on top-left, we might need a StackedLayout or absolute positioning.
+        # But a simple VBox with the button bar on top is cleaner and avoids covering text.
+        # User asked for "top-left of debug console page". 
+        # Let's put it ON TOP of the text edit in a vertical layout.
+        self.left_console_layout.addWidget(self.left_console_top_bar)
+        self.left_console_layout.addWidget(self.raw_data_console)
         
         # Right Console: Debug Info
         self.debug_info_console = QTextEdit()
@@ -71,7 +116,7 @@ class MainWindow(QMainWindow):
         self.debug_info_console.setPlaceholderText("Debug Info & Pose Processing Log...")
         self.debug_info_console.setStyleSheet(console_style)
         
-        self.debug_splitter.addWidget(self.raw_data_console)
+        self.debug_splitter.addWidget(self.left_console_container)
         self.debug_splitter.addWidget(self.debug_info_console)
         # Set initial sizes (50/50)
         self.debug_splitter.setSizes([640, 640])
@@ -84,29 +129,6 @@ class MainWindow(QMainWindow):
         self.status_bar_layout.setContentsMargins(10, 5, 10, 5)
         self.status_bar_widget.setStyleSheet("background-color: #252526; border-top: 1px solid #333;")
         self.status_bar_widget.setFixedHeight(30) # Fixed height for status bar
-        
-        # Hold to View Parsed Button (Moved to Status Bar)
-        self.parsed_view_btn = QPushButton("按住查看解析数据")
-        self.parsed_view_btn.setFixedWidth(120)
-        self.parsed_view_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #333;
-                color: #ccc;
-                border: 1px solid #555;
-                padding: 2px 4px;
-                font-size: 11px;
-                border-radius: 2px;
-            }
-            QPushButton:pressed {
-                background-color: #555;
-            }
-        """)
-        self.parsed_view_btn.pressed.connect(self.enable_parse_view)
-        self.parsed_view_btn.released.connect(self.disable_parse_view)
-        self.show_parsed_data = False
-        
-        self.status_bar_layout.addWidget(self.parsed_view_btn)
-        self.status_bar_layout.addSpacing(10)
         
         # Status Labels
         self.udp_status_label = QLabel("UDP: Idle")
@@ -211,58 +233,31 @@ class MainWindow(QMainWindow):
     def on_trail_length_changed(self, value):
         self.viewer.set_trail_length(value)
 
-    def enable_parse_view(self):
-        self.show_parsed_data = True
-        
-    def disable_parse_view(self):
-        self.show_parsed_data = False
+    def toggle_parse_view(self, state):
+        self.show_parsed_data = bool(state)
+        # Clear console when switching modes to avoid confusion
+        self.raw_data_console.clear()
 
-    def format_parsed_data(self, prefix, data):
+    def format_parsed_data(self, prefix, linear_acc, gyr, mag):
         """
-        Format parsed data into a readable string with labels from config.
+        Format parsed data into a readable string showing:
+        - Linear Acceleration (Gravity Stripped)
+        - Gyroscope (Multiplied)
+        - Magnetometer (Multiplied)
         """
-        points_config = self.config_loader.get("points", [])
-        formatted_parts = []
-        
-        # Helper to format a single point config
-        def format_point(cfg, values):
-            try:
-                name = cfg.get("name", "Unknown")
-                x_idx = cfg.get("x", {}).get("index", -1)
-                y_idx = cfg.get("y", {}).get("index", -1)
-                z_idx = cfg.get("z", {}).get("index", -1)
-                
-                parts = []
-                # Use raw index access, multipliers are handled in viewer/pose_processor, 
-                # here we just show what indices mean.
-                if 0 <= x_idx < len(values): parts.append(f"X:{values[x_idx]:.2f}")
-                if 0 <= y_idx < len(values): parts.append(f"Y:{values[y_idx]:.2f}")
-                if 0 <= z_idx < len(values): parts.append(f"Z:{values[z_idx]:.2f}")
-                
-                if parts:
-                    return f"{name}({', '.join(parts)})"
-            except:
-                pass
-            return None
-
-        # Iterate config to find matching points
-        for p in points_config:
-            # Check prefix match
-            p_prefix = p.get("prefix")
-            if p_prefix == "": p_prefix = None
-            
-            # If both are None or match
-            if p_prefix == prefix:
-                res = format_point(p, data)
-                if res:
-                    formatted_parts.append(res)
-        
-        # If no config matched or partial match, also show raw list
-        if formatted_parts:
-            return " | ".join(formatted_parts)
+        parts = []
+        if linear_acc is not None:
+            parts.append(f"LinACC(X:{linear_acc[0]:.2f}, Y:{linear_acc[1]:.2f}, Z:{linear_acc[2]:.2f})")
         else:
-            # Fallback to simple list display
-            return f"List: {data}"
+            parts.append("LinACC: N/A")
+            
+        if gyr is not None:
+            parts.append(f"GYR(X:{gyr[0]:.2f}, Y:{gyr[1]:.2f}, Z:{gyr[2]:.2f})")
+            
+        if mag is not None:
+            parts.append(f"MAG(X:{mag[0]:.2f}, Y:{mag[1]:.2f}, Z:{mag[2]:.2f})")
+            
+        return " | ".join(parts)
 
     def on_pose_updated(self, name, x, y, z):
         """Handle position updates from PoseProcessor."""
@@ -287,22 +282,24 @@ class MainWindow(QMainWindow):
             self.raw_data_console.insertPlainText(log_msg + "\n")
             self.raw_data_console.moveCursor(QTextCursor.End)
 
-    def on_data_received(self, source, prefix, data):
-        """Handle received data from UDP or Serial."""
-        import time
-        current_time = time.time()
-        
-        # If in parsed view mode, log parsed data
+    def on_parsed_data_updated(self, source, prefix, linear_acc, gyr, mag):
+        """Handle parsed data updates (Linear Acc, Gyr, Mag) for parsed view log."""
         if self.debug_splitter.isVisible() and self.show_parsed_data:
-            timestamp = time.strftime("%H:%M:%S", time.localtime(current_time))
-            parsed_str = self.format_parsed_data(prefix, data)
+            import time
+            timestamp = time.strftime("%H:%M:%S", time.localtime(time.time()))
+            parsed_str = self.format_parsed_data(prefix, linear_acc, gyr, mag)
             log_msg = f"[{timestamp}] [{source.upper()}] [PARSED] {parsed_str}"
             
             self.raw_data_console.moveCursor(QTextCursor.End)
             self.raw_data_console.insertPlainText(log_msg + "\n")
             self.raw_data_console.moveCursor(QTextCursor.End)
 
-        # Process data for pose estimation
+    def on_data_received(self, source, prefix, data):
+        """Handle received data from UDP or Serial."""
+        import time
+        current_time = time.time()
+        
+        # Process data for pose estimation first
         self.pose_processor.process(source, prefix, data)
         
         # Update status indicators

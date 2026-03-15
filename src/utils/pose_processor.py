@@ -8,6 +8,9 @@ class PoseProcessor(QObject):
     position_updated = Signal(str, float, float, float)
     # Signal emitted for debug logging
     log_message = Signal(str)
+    # Signal for linear acceleration (gravity stripped): (source, prefix, linear_acc, gyr, mag)
+    # Using 'object' for gyr and mag to allow None values, as 'list' type enforces strict list type
+    parsed_data_updated = Signal(str, str, list, object, object)
 
     def __init__(self, config_loader):
         super().__init__()
@@ -28,7 +31,8 @@ class PoseProcessor(QObject):
         self.beta = 0.1
         
         # Gravity in Earth frame (m/s^2)
-        self.gravity = 9.81
+        # Load from config, default to 9.81 if not set
+        self.gravity = self.config_loader.get("gravity_reference", 9.81)
 
     def _initialize_orientation(self, acc, mag):
         """
@@ -98,6 +102,7 @@ class PoseProcessor(QObject):
         mag_vec = None
         
         # Find the relevant points for this source/prefix
+        matched_points = 0
         for p in points_config:
             # Check source match
             p_source = p.get("source", "any")
@@ -106,10 +111,20 @@ class PoseProcessor(QObject):
                 
             # Check prefix match
             p_prefix = p.get("prefix")
-            if p_prefix == "": p_prefix = None
-            if p_prefix != prefix:
+            if not p_prefix:  # Handles None and ""
+                p_prefix = None
+            
+            # Normalize incoming prefix too (just in case)
+            current_prefix = prefix
+            if not current_prefix: # Handles None and ""
+                current_prefix = None
+            
+            # If incoming prefix is None (no prefix), only match config with no prefix (None)
+            # If incoming prefix is "G", only match config with prefix "G"
+            if p_prefix != current_prefix:
                 continue
             
+            matched_points += 1
             purpose = p.get("purpose")
             if purpose == "accelerometer":
                 acc_vec = self._extract_vector(p, data)
@@ -120,6 +135,13 @@ class PoseProcessor(QObject):
 
         # If we don't have at least accelerometer data, we can't calculate displacement
         if acc_vec is None:
+            # If we received data but couldn't extract ACC, log a warning once
+            if self.frame_count == 0:
+                self.log_message.emit(f"Warning: Received data from {source} (len={len(data)}) but failed to extract Accelerometer vector.")
+                if matched_points == 0:
+                     self.log_message.emit(f"  -> No config points matched source='{source}' and prefix='{prefix}' (normalized: '{'None' if not prefix else prefix}'). Check config.")
+                else:
+                     self.log_message.emit(f"  -> Matched {matched_points} config points, but extraction failed. Check indices vs data length.")
             return
 
         current_time = time.time()
@@ -138,10 +160,10 @@ class PoseProcessor(QObject):
         # Heuristic: Check magnitude of acceleration
         acc_mag = np.linalg.norm(acc_vec)
         
-        # If magnitude is close to 1g (9.8), it likely includes gravity.
+        # If magnitude is close to 1g (self.gravity), it likely includes gravity.
         # If magnitude is small (near 0), it likely has gravity removed.
         has_gravity = False
-        if abs(acc_mag - 9.8) < 2.0: # 1g +/- 2.0 m/s^2
+        if abs(acc_mag - self.gravity) < 2.0: # 1g +/- 2.0 m/s^2
             has_gravity = True
         elif abs(acc_mag) < 2.0:
             has_gravity = False # Already linear
@@ -190,13 +212,23 @@ class PoseProcessor(QObject):
             acc_earth = self._rotate_vector(acc_vec, self.q)
             
             # Remove gravity (assuming Earth frame Z is up, so gravity is [0, 0, -9.8] or [0, 0, 9.8]?)
-            # Usually gravity points DOWN. So in Earth frame, accelerometer measures reaction force UP [0, 0, 9.8].
-            # So we subtract [0, 0, 9.8].
-            linear_acc = acc_earth - np.array([0.0, 0.0, 9.81])
+            # Usually gravity points DOWN. So in Earth frame, accelerometer measures reaction force UP [0, 0, g].
+            # So we subtract [0, 0, g].
+            linear_acc = acc_earth - np.array([0.0, 0.0, self.gravity])
             
             if should_log:
                 debug_msg.append(f"Q: [{self.q[0]:.2f}, {self.q[1]:.2f}, {self.q[2]:.2f}, {self.q[3]:.2f}]")
                 debug_msg.append(f"Acc Earth: [{acc_earth[0]:.2f}, {acc_earth[1]:.2f}, {acc_earth[2]:.2f}]")
+        
+        # Emit parsed data for UI (convert numpy array to list)
+        # Always emit this signal regardless of gravity state so UI can update even if static
+        self.parsed_data_updated.emit(
+            source, 
+            prefix if prefix else "", 
+            linear_acc.tolist(),
+            gyr_vec.tolist() if gyr_vec is not None else None,
+            mag_vec.tolist() if mag_vec is not None else None
+        )
 
         # 3. Integrate to get Velocity and Position
         # Simple Euler integration
@@ -231,14 +263,20 @@ class PoseProcessor(QObject):
             y_mult = y_cfg.get("multiplier", 1.0)
             z_mult = z_cfg.get("multiplier", 1.0)
             
-            if len(data) > max(x_idx, y_idx, z_idx):
+            max_idx = max(x_idx, y_idx, z_idx)
+            if len(data) > max_idx:
                 return np.array([
                     float(data[x_idx]) * x_mult,
                     float(data[y_idx]) * y_mult,
                     float(data[z_idx]) * z_mult
                 ])
-        except Exception:
-            pass
+            else:
+                # Log debug info only if this is likely intended to be matched (e.g. valid source/prefix)
+                # But we don't have that context here easily without passing more args.
+                # However, for debugging the current issue, we can just return None.
+                pass
+        except Exception as e:
+            self.log_message.emit(f"Error extracting vector for {config.get('name')}: {str(e)}")
         return None
 
     def _rotate_vector(self, v, q):
