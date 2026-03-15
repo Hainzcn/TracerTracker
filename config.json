@@ -1,7 +1,7 @@
 {
     "gravity_reference": 10.00,
     "udp": {
-        "enabled": false,
+        "enabled": true,
         "ip": "127.0.0.1",
         "port": 8888
     },

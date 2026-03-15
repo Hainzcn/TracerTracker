@@ -1,38 +1,60 @@
 # TracerTracker
 
-A Python-based 3D path visualization tool.
+TracerTracker 是一个基于 Python 和 PySide6 (Qt) 开发的 3D 轨迹可视化工具。它能够实时接收来自串口或 UDP 的传感器数据，进行物理姿态解算，并在 3D 空间中动态绘制运动轨迹。
 
-## Features
-- 3D Coordinate System Rendering
-- Interactive Camera Controls:
-  - **Left Click + Drag**: Rotate (Orbit)
-  - **Right Click + Drag**: Pan (Follow Mouse)
-  - **Middle Click**: Smooth Reset to Default View
-  - **Scroll Wheel**: Zoom
-- High-end Dark Theme
-- **Data Reception**:
-  - Supports UDP (Localhost) and Serial Port simultaneously
-  - Configurable via `config.json`
-  - Parses comma-separated values (CSV)
-  - **Flexible Data Parsing**:
-    - Configure multiple tracked points from different sources (UDP/Serial)
-    - Custom index mapping for X, Y, Z coordinates
-    - Apply multipliers and sign inversion per coordinate
-    - Customizable color and size for each point
-- **Real-time Status Monitoring**:
-  - Visual indicators for UDP and Serial connection status
-  - Displays received data count and activity
+> **⚠️ 说明**: 本项目主要由 AI 辅助生成和编写。
 
-## Installation
+## 主要功能
 
-1. Install dependencies:
+*   **实时数据接收与解析**
+    *   支持通过 **UDP** 和 **串口** 实时接收数据。
+    *   通过 `config.json` 灵活配置系统，支持自定义数据源、前缀匹配、CSV 数据索引映射。
+    *   支持为不同数据通道设置独立的乘数（放大/缩小）和坐标轴反转。
+
+*   **内置物理姿态引擎**
+    *   支持处理 6 轴 (加速度计 + 陀螺仪) 或 9 轴 (+ 磁力计) IMU 传感器数据。
+    *   内置 Madgwick 滤波算法（支持 6DOF/9DOF）进行姿态估计。
+    *   自动识别并动态剥离重力加速度。
+    *   通过对线性加速度进行二次积分，实时计算并输出空间位移路径。
+
+*   **高性能 3D 渲染**
+    *   提供流畅的 3D 坐标系与网格渲染。
+    *   **交互式相机控制**：
+        *   **左键 + 拖动**：旋转视角
+        *   **右键 + 拖动**：平移视角
+        *   **鼠标滚轮**：缩放视角
+        *   **鼠标中键**：平滑复位至默认视角
+    *   支持多点独立渲染，可自定义各追踪点的颜色和大小。
+    *   提供“全路径”和“速度尾迹”两种轨迹显示模式，尾迹长度可动态调节。
+
+*   **高级调试与监控界面**
+    *   现代化的暗色主题用户界面。
+    *   **双栏调试控制台**：
+        *   左侧：实时显示原始串口/UDP数据流，支持一键切换为“解析视图”（查看剥离重力后的线性加速度、陀螺仪、磁力计数值）。
+        *   右侧：显示姿态引擎内部的详细运算日志（包含四元数、重力扣除状态等）。
+    *   底部状态栏提供实时的连接状态和数据包接收统计。
+
+## 安装说明
+
+1. 确保您的系统已安装 Python 3.8+。
+2. 安装项目依赖：
+
    ```bash
    pip install -r requirements.txt
    ```
 
-## Usage
+## 运行方法
 
-Run the application:
+在项目根目录下运行主程序：
+
 ```bash
 python src/main.py
 ```
+
+## 配置说明 (config.json)
+
+首次运行或未找到配置文件时，程序会自动生成默认的 `config.json`。您可以根据实际硬件需求修改以下关键参数：
+*   `gravity_reference`: 当地或硬件标定的重力加速度参考值（默认 `10.00`）。
+*   `serial`: 串口号、波特率设置。
+*   `udp`: IP 地址与端口设置。
+*   `points`: 数据解析规则列表。可定义如何从原始数据流中提取特定传感器的 X/Y/Z 轴数据。
