@@ -275,7 +275,7 @@ class PoseProcessor(QObject):
                 # But we don't have that context here easily without passing more args.
                 # However, for debugging the current issue, we can just return None.
                 pass
-        except Exception as e:
+        except (IndexError, ValueError, TypeError, KeyError) as e:
             self.log_message.emit(f"Error extracting vector for {config.get('name')}: {str(e)}")
         return None
 
@@ -362,7 +362,10 @@ class PoseProcessor(QObject):
         # Normalize quaternion
         norm = math.sqrt(q0*q0 + q1*q1 + q2*q2 + q3*q3)
         if norm > 0:
-            q /= norm
+            q0 /= norm
+            q1 /= norm
+            q2 /= norm
+            q3 /= norm
             
         return np.array([q0, q1, q2, q3])
 
@@ -454,6 +457,9 @@ class PoseProcessor(QObject):
         # Normalize
         norm = math.sqrt(q0*q0 + q1*q1 + q2*q2 + q3*q3)
         if norm > 0:
-            q /= norm
+            q0 /= norm
+            q1 /= norm
+            q2 /= norm
+            q3 /= norm
             
         return np.array([q0, q1, q2, q3])

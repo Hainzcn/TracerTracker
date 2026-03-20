@@ -1,10 +1,14 @@
+import logging
+import json
+import os
+import time
+
 from PySide6.QtCore import Qt, QPoint, QTimer, QTime, Signal
 from PySide6.QtGui import QVector3D, QColor, QMatrix4x4
 import pyqtgraph.opengl as gl
 import numpy as np
-import json
-import os
-import time
+
+logger = logging.getLogger(__name__)
 
 class Config:
     def __init__(self, config_path='config.json'):
@@ -77,6 +81,7 @@ class Viewer3D(gl.GLViewWidget):
         self.trail_length = 120
         self.trail_width_min = 2.4
         self.trail_width_max = 6.0
+        self.max_history_length = 10000
         
         # State for adaptive scaling
         self.first_point_rendered = False
@@ -123,7 +128,7 @@ class Viewer3D(gl.GLViewWidget):
             return
         point_text = f"[{name}]" if name is not None else "[GLOBAL]"
         msg = f"[Viewer3D][{level}]{point_text}[{code}] {detail}"
-        print(msg)
+        logger.debug(msg)
         self.log_message.emit(msg)
 
     def _create_axis_label(self, text, pos, color):
@@ -333,6 +338,11 @@ class Viewer3D(gl.GLViewWidget):
             self.point_histories[name].append(current_pos)
             self.point_speeds[name].append(speed)
             self.point_times[name].append(current_time)
+            if len(self.point_histories[name]) > self.max_history_length:
+                excess = len(self.point_histories[name]) - self.max_history_length
+                self.point_histories[name] = self.point_histories[name][excess:]
+                self.point_speeds[name] = self.point_speeds[name][excess:]
+                self.point_times[name] = self.point_times[name][excess:]
             if self.full_path_mode or self.trail_mode:
                 history_len = len(self.point_histories[name])
                 self._render_debug("POINT_HISTORY_APPEND", f"追加轨迹点，当前点数={history_len}，速度={speed:.6f}", name, verbose=True)

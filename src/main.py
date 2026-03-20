@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 
 # Add the project root directory to sys.path to ensure imports work correctly
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -9,22 +10,30 @@ if project_root not in sys.path:
 from PySide6.QtWidgets import QApplication
 from src.ui.main_window import MainWindow
 
+logger = logging.getLogger(__name__)
+
 def main():
-    # Set up environment for high-DPI scaling
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     
     app = QApplication(sys.argv)
     app.setApplicationName("TracerTracker")
     
-    # Create and show the main window
-    window = MainWindow()
-    window.show()
-    
     try:
+        window = MainWindow()
+        window.show()
         sys.exit(app.exec())
     except KeyboardInterrupt:
-        print("Interrupted by user. Exiting...")
+        logger.info("Interrupted by user. Exiting...")
         sys.exit(0)
+    except Exception:
+        logger.critical("Unhandled exception", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

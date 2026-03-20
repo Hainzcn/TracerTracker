@@ -1,8 +1,11 @@
+import logging
 import socket
 import threading
 import time
 import serial
 from PySide6.QtCore import QObject, Signal
+
+logger = logging.getLogger(__name__)
 
 class DataReceiver(QObject):
     """
@@ -30,13 +33,13 @@ class DataReceiver(QObject):
         if udp_config.get('enabled', False):
             self.udp_thread = threading.Thread(target=self._udp_loop, args=(udp_config,), daemon=True)
             self.udp_thread.start()
-            print(f"UDP Receiver started on {udp_config['ip']}:{udp_config['port']}")
+            logger.info("UDP Receiver started on %s:%s", udp_config['ip'], udp_config['port'])
             
         serial_config = self.config_loader.get_serial_config()
         if serial_config.get('enabled', False):
             self.serial_thread = threading.Thread(target=self._serial_loop, args=(serial_config,), daemon=True)
             self.serial_thread.start()
-            print(f"Serial Receiver started on {serial_config['port']} @ {serial_config['baudrate']}")
+            logger.info("Serial Receiver started on %s @ %s", serial_config['port'], serial_config['baudrate'])
 
     def stop(self):
         """Stop all receiver threads."""
@@ -54,7 +57,7 @@ class DataReceiver(QObject):
         if self.serial_thread:
             self.serial_thread.join(timeout=1.0)
             
-        print("Data receivers stopped.")
+        logger.info("Data receivers stopped.")
 
     def _parse_data(self, raw_data):
         """
@@ -94,8 +97,8 @@ class DataReceiver(QObject):
                 
             values = [float(x.strip()) for x in csv_part.split(',')]
             return (prefix, values)
-        except Exception as e:
-            # print(f"Error parsing data '{raw_data}': {e}")
+        except (ValueError, UnicodeDecodeError, IndexError) as e:
+            logger.debug("Error parsing data: %s", e)
             return None
 
     def _udp_loop(self, config):
@@ -117,8 +120,8 @@ class DataReceiver(QObject):
                         raw_text = data.decode('utf-8').strip()
                         if raw_text:
                             self.raw_data_received.emit("udp", raw_text)
-                    except Exception:
-                        pass # Ignore decode errors for raw log or handle differently
+                    except UnicodeDecodeError:
+                        logger.debug("UDP raw data decode failed")
                         
                     result = self._parse_data(data)
                     if result:
@@ -126,13 +129,13 @@ class DataReceiver(QObject):
                         self.data_received.emit("udp", prefix, parsed)
                 except socket.timeout:
                     continue
-                except Exception as e:
+                except OSError as e:
                     if self.running:
-                        print(f"UDP Error: {e}")
-                        time.sleep(1) # Wait before retrying
+                        logger.warning("UDP Error: %s", e)
+                        time.sleep(1)
                         
-        except Exception as e:
-            print(f"Failed to bind UDP socket: {e}")
+        except OSError as e:
+            logger.error("Failed to bind UDP socket: %s", e)
         finally:
             if self.udp_socket:
                 self.udp_socket.close()
@@ -146,7 +149,7 @@ class DataReceiver(QObject):
         while self.running:
             try:
                 self.serial_port = serial.Serial(port, baudrate, timeout=timeout)
-                print(f"Serial port {port} opened successfully.")
+                logger.info("Serial port %s opened successfully.", port)
                 
                 while self.running and self.serial_port.is_open:
                     try:
@@ -158,8 +161,8 @@ class DataReceiver(QObject):
                                 raw_text = line.decode('utf-8').strip()
                                 if raw_text:
                                     self.raw_data_received.emit("serial", raw_text)
-                            except Exception:
-                                pass
+                            except UnicodeDecodeError:
+                                logger.debug("Serial raw data decode failed")
                                 
                             result = self._parse_data(line)
                             if result:
@@ -167,15 +170,15 @@ class DataReceiver(QObject):
                                 self.data_received.emit("serial", prefix, parsed)
                         else:
                             time.sleep(0.01) # Prevent high CPU usage
-                    except Exception as e:
-                        print(f"Serial Read Error: {e}")
-                        break # Break inner loop to reconnect
+                    except (serial.SerialException, OSError) as e:
+                        logger.warning("Serial Read Error: %s", e)
+                        break
                         
             except serial.SerialException as e:
-                # print(f"Serial Connection Error ({port}): {e}")
-                time.sleep(2) # Wait before retrying
-            except Exception as e:
-                print(f"Unexpected Serial Error: {e}")
+                logger.warning("Serial Connection Error (%s): %s", port, e)
+                time.sleep(2)
+            except OSError as e:
+                logger.error("Unexpected Serial Error: %s", e)
                 time.sleep(2)
             finally:
                 if self.serial_port and self.serial_port.is_open:

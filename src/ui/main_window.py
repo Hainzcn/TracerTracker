@@ -1,3 +1,6 @@
+import logging
+import time
+
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget, QLabel, QHBoxLayout, QSizePolicy, QTextEdit, QCheckBox, QSpinBox, QSplitter, QPushButton
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QTextCursor
@@ -5,6 +8,8 @@ from src.ui.viewer_3d import Viewer3D
 from src.utils.config_loader import ConfigLoader
 from src.utils.data_receiver import DataReceiver
 from src.utils.pose_processor import PoseProcessor
+
+logger = logging.getLogger(__name__)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -274,7 +279,6 @@ class MainWindow(QMainWindow):
     def on_raw_data_received(self, source, raw_text):
         """Handle raw data log."""
         if self.debug_splitter.isVisible() and not self.show_parsed_data:
-            import time
             timestamp = time.strftime("%H:%M:%S", time.localtime(time.time()))
             log_msg = f"[{timestamp}] [{source.upper()}] {raw_text}"
             
@@ -285,7 +289,6 @@ class MainWindow(QMainWindow):
     def on_parsed_data_updated(self, source, prefix, linear_acc, gyr, mag):
         """Handle parsed data updates (Linear Acc, Gyr, Mag) for parsed view log."""
         if self.debug_splitter.isVisible() and self.show_parsed_data:
-            import time
             timestamp = time.strftime("%H:%M:%S", time.localtime(time.time()))
             parsed_str = self.format_parsed_data(prefix, linear_acc, gyr, mag)
             log_msg = f"[{timestamp}] [{source.upper()}] [PARSED] {parsed_str}"
@@ -296,7 +299,6 @@ class MainWindow(QMainWindow):
 
     def on_data_received(self, source, prefix, data):
         """Handle received data from UDP or Serial."""
-        import time
         current_time = time.time()
         
         # Process data for pose estimation first
@@ -366,12 +368,11 @@ class MainWindow(QMainWindow):
                     size = point_cfg.get("size", 10)
                     
                     self.viewer.update_point(name, x, y, z, color, size)
-            except Exception as e:
-                print(f"Error processing point {point_cfg.get('name')}: {e}")
+            except (IndexError, ValueError, TypeError, KeyError) as e:
+                logger.warning("Error processing point %s: %s", point_cfg.get('name'), e)
         
     def check_status_timeout(self):
         """Reset status labels if no data received for a while."""
-        import time
         current_time = time.time()
         timeout = 2.0 # Seconds
         

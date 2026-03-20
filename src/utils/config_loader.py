@@ -1,5 +1,8 @@
 import json
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 class ConfigLoader:
     _instance = None
@@ -65,15 +68,15 @@ class ConfigLoader:
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:
                     self._config = json.load(f)
-                    print(f"Configuration loaded from {config_path}")
+                    logger.info("Configuration loaded from %s", config_path)
                     # Ensure gravity_reference is present if not in file
                     if "gravity_reference" not in self._config:
                         self._config["gravity_reference"] = self.DEFAULT_CONFIG["gravity_reference"]
             except Exception as e:
-                print(f"Error loading config: {e}. Using defaults.")
+                logger.error("Error loading config: %s. Using defaults.", e)
                 self._config = self.DEFAULT_CONFIG.copy()
         else:
-            print("Config file not found. Creating default config.")
+            logger.info("Config file not found. Creating default config.")
             self._config = self.DEFAULT_CONFIG.copy()
             self.save_config()
 
@@ -83,9 +86,9 @@ class ConfigLoader:
         try:
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(self._config, f, indent=4)
-                print(f"Configuration saved to {config_path}")
+                logger.info("Configuration saved to %s", config_path)
         except Exception as e:
-            print(f"Error saving config: {e}")
+            logger.error("Error saving config: %s", e)
 
     def get(self, key, default=None):
         """Get a configuration value."""
