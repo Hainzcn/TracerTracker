@@ -43,7 +43,7 @@ class Viewer3D(gl.GLViewWidget):
         
         # Initial camera settings
         self.initial_state = {
-            'distance': 40,
+            'distance': 60,
             'elevation': 30,
             'azimuth': -45,
             'center': QVector3D(0, 0, 0)
@@ -62,14 +62,14 @@ class Viewer3D(gl.GLViewWidget):
         self.TICK_LABEL_POOL_SIZE = 30
         self.TICK_LINE_LENGTH_RATIO = 0.02
         
-        # Add a grid
-        self.grid = gl.GLGridItem()
-        self.grid.setSize(x=20, y=20, z=20)
-        self.grid.setSpacing(x=1, y=1, z=1)
-        # Custom grid color for high-end look (cyan/blueish tint, very subtle)
-        # RGBA: (0, 255, 255, 50)
-        self.grid.setColor((0, 255, 255, 50)) 
-        self.addItem(self.grid)
+        # Dual-layer XOY grid: major lines align with axis ticks, minor lines subdivide
+        self.grid_major = gl.GLGridItem()
+        self.grid_major.setColor((0, 255, 255, 40))
+        self.addItem(self.grid_major)
+
+        self.grid_minor = gl.GLGridItem()
+        self.grid_minor.setColor((0, 255, 255, 20))
+        self.addItem(self.grid_minor)
         
         # Add custom thickened and extended axes
         self.add_custom_axes()
@@ -339,12 +339,25 @@ class Viewer3D(gl.GLViewWidget):
         else:
             self.tick_line_item.setVisible(False)
 
-        # --- grid (XOY plane) ---
-        grid_extent = max(pos_ext, 10)
-        grid_spacing = self._compute_nice_interval(grid_extent, target_ticks=10)
-        if hasattr(self, 'grid'):
-            self.grid.setSize(x=grid_extent * 2, y=grid_extent * 2, z=grid_extent * 2)
-            self.grid.setSpacing(x=grid_spacing, y=grid_spacing, z=grid_spacing)
+        # --- grid (XOY plane) aligned with tick interval ---
+        grid_extent = max(pos_ext * 2, 20)
+
+        self.grid_major.setSize(x=grid_extent, y=grid_extent)
+        self.grid_major.setSpacing(x=interval, y=interval)
+
+        minor_spacing = interval / 5.0
+        num_minor_lines = grid_extent / minor_spacing if minor_spacing > 1e-12 else 999
+        if num_minor_lines > 200:
+            minor_alpha = 0
+        elif num_minor_lines > 100:
+            minor_alpha = int(20 * (1.0 - (num_minor_lines - 100) / 100.0))
+        else:
+            minor_alpha = 20
+
+        self.grid_minor.setSize(x=grid_extent, y=grid_extent)
+        self.grid_minor.setSpacing(x=minor_spacing, y=minor_spacing)
+        self.grid_minor.setColor((0, 255, 255, max(minor_alpha, 0)))
+        self.grid_minor.setVisible(minor_alpha > 0)
         
     def update_point(self, name, x, y, z, color=(1, 0, 0, 1), size=10):
         """
