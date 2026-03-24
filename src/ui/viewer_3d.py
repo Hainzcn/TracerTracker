@@ -1,5 +1,6 @@
 import logging
 import json
+import math
 import os
 import time
 
@@ -55,6 +56,11 @@ class Viewer3D(gl.GLViewWidget):
             azimuth=self.initial_state['azimuth']
         )
         self.setBackgroundColor('#121212')  # Dark high-end background
+
+        # Coordinate system visual parameters (must be set before add_custom_axes)
+        self.AXIS_VISUAL_RATIO = 0.5
+        self.TICK_LABEL_POOL_SIZE = 30
+        self.TICK_LINE_LENGTH_RATIO = 0.02
         
         # Add a grid
         self.grid = gl.GLGridItem()
@@ -91,10 +97,6 @@ class Viewer3D(gl.GLViewWidget):
         
         # Custom camera pan offset (screen space translation)
         self.pan_offset = QVector3D(0, 0, 0)
-        
-        # Axes size state
-        self.current_axes_size = 20
-        self.target_axes_size = 20
         
         # Enable keyboard focus
         self.setFocusPolicy(Qt.StrongFocus)
@@ -195,73 +197,154 @@ class Viewer3D(gl.GLViewWidget):
                 layer_item.setVisible(False)
             return
         item.setVisible(False)
-        
+
+    @staticmethod
+    def _compute_nice_interval(range_val, target_ticks=6):
+        if range_val <= 0:
+            return 1.0
+        raw = range_val / target_ticks
+        exponent = math.floor(math.log10(max(raw, 1e-15)))
+        fraction = raw / (10 ** exponent)
+        if fraction <= 1.5:
+            nice = 1
+        elif fraction <= 3.5:
+            nice = 2
+        else:
+            nice = 5
+        return nice * (10 ** exponent)
+
     def add_custom_axes(self):
-        """
-        Add custom thickened axes that extend beyond the origin.
-        """
-        # Store initial parameters for later updates
         self.axes_width = 3
-        
-        # Create empty items, will be populated by update_axes_size
+
         self.x_axis = gl.GLLinePlotItem(width=self.axes_width, antialias=True)
         self.y_axis = gl.GLLinePlotItem(width=self.axes_width, antialias=True)
         self.z_axis = gl.GLLinePlotItem(width=self.axes_width, antialias=True)
-        
+
         self.addItem(self.x_axis)
         self.addItem(self.y_axis)
         self.addItem(self.z_axis)
-        
-        # Add Text Labels
+
         label_color = QColor(240, 240, 240, 255)
         self.x_label = self._create_axis_label('X', [20.0, 0.0, 0.0], label_color)
         self.y_label = self._create_axis_label('Y', [0.0, 20.0, 0.0], label_color)
         self.z_label = self._create_axis_label('Z', [0.0, 0.0, 20.0], label_color)
-        
-        # Initial size
-        self.update_axes_size(20)
 
-    def update_axes_size(self, size):
-        """
-        Update the size of the axes and grid to match the scale.
-        """
-        # Ensure minimum size
-        size = max(size, 20)
-        self.current_axes_size = size
-        
-        # Negative extension (origin back-shoot)
-        neg_ext = -size * 0.5
-        pos_ext = size
-        
-        # X Axis (Red)
-        pos_x = np.array([[neg_ext, 0, 0], [pos_ext, 0, 0]], dtype=np.float32)
-        self.x_axis.setData(pos=pos_x, color=(1, 0, 0, 1))
-        
-        # Y Axis (Green)
-        pos_y = np.array([[0, neg_ext, 0], [0, pos_ext, 0]], dtype=np.float32)
-        self.y_axis.setData(pos=pos_y, color=(0, 1, 0, 1))
-        
-        # Z Axis (Blue)
-        pos_z = np.array([[0, 0, neg_ext], [0, 0, pos_ext]], dtype=np.float32)
-        self.z_axis.setData(pos=pos_z, color=(0, 0, 1, 1))
-        
-        # Update Labels Position
-        # Offset slightly from the end
-        label_offset = size * 1.05 
+        # Tick marks: single GLLinePlotItem holding all tick geometry
+        self.tick_line_item = gl.GLLinePlotItem(width=1.5, antialias=True, mode='lines')
+        self.tick_line_item.setGLOptions('translucent')
+        self.addItem(self.tick_line_item)
+
+        # Tick labels: pre-allocated pool of GLTextItem
+        self.tick_label_pool = []
+        tick_label_color = QColor(180, 180, 180, 200)
+        for _ in range(self.TICK_LABEL_POOL_SIZE):
+            lbl = gl.GLTextItem(pos=np.zeros(3, dtype=float), text='', color=tick_label_color)
+            lbl.setVisible(False)
+            self.addItem(lbl)
+            self.tick_label_pool.append(lbl)
+
+        self.update_coordinate_system()
+
+    def update_coordinate_system(self):
+        dist = self.cameraParams()['distance']
+        axis_length = dist * self.AXIS_VISUAL_RATIO
+        neg_ext = -axis_length * 0.5
+        pos_ext = axis_length
+
+        # --- axis lines ---
+        self.x_axis.setData(
+            pos=np.array([[neg_ext, 0, 0], [pos_ext, 0, 0]], dtype=np.float32),
+            color=(1, 0, 0, 1))
+        self.y_axis.setData(
+            pos=np.array([[0, neg_ext, 0], [0, pos_ext, 0]], dtype=np.float32),
+            color=(0, 1, 0, 1))
+        self.z_axis.setData(
+            pos=np.array([[0, 0, neg_ext], [0, 0, pos_ext]], dtype=np.float32),
+            color=(0, 0, 1, 1))
+
+        # --- axis name labels ---
+        label_offset = pos_ext * 1.08
         if self.x_label is not None:
             self.x_label.setData(pos=np.array([label_offset, 0, 0], dtype=np.float32))
         if self.y_label is not None:
             self.y_label.setData(pos=np.array([0, label_offset, 0], dtype=np.float32))
         if self.z_label is not None:
             self.z_label.setData(pos=np.array([0, 0, label_offset], dtype=np.float32))
-        
-        # Update grid size
+
+        # --- tick computation ---
+        total_range = pos_ext - neg_ext
+        interval = self._compute_nice_interval(total_range, target_ticks=6)
+        tick_half = axis_length * self.TICK_LINE_LENGTH_RATIO
+
+        tick_verts = []
+        tick_colors = []
+        label_idx = 0
+
+        axis_defs = [
+            # (main_axis_index, color_rgba, perp_offsets: two perpendicular directions)
+            (0, (1.0, 0.3, 0.3, 0.7), (1, 2)),  # X axis
+            (1, (0.3, 1.0, 0.3, 0.7), (0, 2)),  # Y axis
+            (2, (0.3, 0.3, 1.0, 0.7), (0, 1)),  # Z axis
+        ]
+
+        for main_ax, color, (perp_a, perp_b) in axis_defs:
+            val = interval
+            while val <= pos_ext + 1e-9:
+                for sign_val in ([val, -val] if val > 1e-9 else [val]):
+                    if sign_val < neg_ext - 1e-9 or sign_val > pos_ext + 1e-9:
+                        continue
+                    # tick line perpendicular to the axis (along perp_a)
+                    p1 = np.zeros(3, dtype=np.float32)
+                    p2 = np.zeros(3, dtype=np.float32)
+                    p1[main_ax] = sign_val
+                    p2[main_ax] = sign_val
+                    p1[perp_a] = -tick_half
+                    p2[perp_a] = tick_half
+                    tick_verts.append(p1)
+                    tick_verts.append(p2)
+                    tick_colors.append(color)
+                    tick_colors.append(color)
+
+                    # tick label
+                    if label_idx < self.TICK_LABEL_POOL_SIZE:
+                        lbl = self.tick_label_pool[label_idx]
+                        lbl_pos = np.zeros(3, dtype=np.float32)
+                        lbl_pos[main_ax] = sign_val
+                        lbl_pos[perp_a] = tick_half * 2.5
+                        v = sign_val
+                        if abs(v) < 1e-9:
+                            txt = '0'
+                        elif abs(v) >= 1000 or (abs(v) < 0.01 and abs(v) > 0):
+                            txt = f'{v:.2e}'
+                        elif v == int(v):
+                            txt = str(int(v))
+                        else:
+                            txt = f'{v:.2f}'.rstrip('0').rstrip('.')
+                        lbl.setData(pos=lbl_pos.astype(float), text=txt)
+                        lbl.setVisible(True)
+                        label_idx += 1
+                val += interval
+
+        # hide unused labels
+        for i in range(label_idx, self.TICK_LABEL_POOL_SIZE):
+            self.tick_label_pool[i].setVisible(False)
+
+        # update tick geometry
+        if len(tick_verts) >= 2:
+            self.tick_line_item.setData(
+                pos=np.array(tick_verts, dtype=np.float32),
+                color=np.array(tick_colors, dtype=np.float32),
+                mode='lines')
+            self.tick_line_item.setVisible(True)
+        else:
+            self.tick_line_item.setVisible(False)
+
+        # --- grid (XOY plane) ---
+        grid_extent = max(pos_ext, 10)
+        grid_spacing = self._compute_nice_interval(grid_extent, target_ticks=10)
         if hasattr(self, 'grid'):
-            # Adjust spacing to avoid too many lines
-            # Target ~20 lines per dimension
-            spacing = max(1, size / 20)
-            self.grid.setSize(x=size*2, y=size*2, z=size*2) # Grid covers neg and pos
-            self.grid.setSpacing(x=spacing, y=spacing, z=spacing)
+            self.grid.setSize(x=grid_extent * 2, y=grid_extent * 2, z=grid_extent * 2)
+            self.grid.setSpacing(x=grid_spacing, y=grid_spacing, z=grid_spacing)
         
     def update_point(self, name, x, y, z, color=(1, 0, 0, 1), size=10):
         """
@@ -277,17 +360,12 @@ class Viewer3D(gl.GLViewWidget):
         if not self.first_point_rendered:
             dist = np.sqrt(x**2 + y**2 + z**2)
             cam_dist = self.cameraParams()['distance']
-            
-            # If point is significantly far (e.g. outside current view comfort zone), adapt view
-            # Standard comfort zone for distance=40 is around 20 units radius
+
             if dist > cam_dist * 0.4:
-                # Scale out to fit point comfortably
-                # Factor 2.5 gives good context with origin
                 new_dist = dist * 2.5
-                
-                # Apply adaptive scaling and rotation (reset to optimal view)
                 self.setCameraPosition(distance=new_dist, elevation=30, azimuth=45)
-                
+                self.update_coordinate_system()
+
             self.first_point_rendered = True
         
         # Convert color from list [r, g, b, a] (0-255) to tuple (0-1) if needed
@@ -560,67 +638,50 @@ class Viewer3D(gl.GLViewWidget):
 
     def auto_fit_view(self):
         """
-        Automatically adjust the view to fit all points elegantly.
-        - Calculates bounding box of all points
-        - Centers the view on origin (resets pan)
-        - Adjusts zoom distance to encompass all points
+        Automatically adjust the view to fit all points.
+        Camera distance is set so that the furthest point sits comfortably
+        within the viewport. Axes, ticks, and grid follow automatically via
+        update_coordinate_system() called each animation frame.
         """
         if not self.points:
             return
 
-        # Find maximum distance from origin
         max_dist = 0
         for item in self.points.values():
-            # item.pos is a numpy array (N, 3)
             pos_data = item.pos
             if pos_data is None or len(pos_data) == 0:
                 continue
-                
-            # Calculate distance for each point (though usually 1 per item here)
-            # We use linalg.norm on the pos array
-            # If pos_data has multiple points, we want max of norms
             dists = np.linalg.norm(pos_data, axis=1)
             if len(dists) > 0:
                 current_max = np.max(dists)
                 if current_max > max_dist:
                     max_dist = current_max
-        
-        # Determine target distance
-        # Default if no points or points at origin
+
         if max_dist < 1.0:
             target_dist = self.initial_state['distance']
         else:
-            # Factor 2.5 provides a comfortable margin
             target_dist = max_dist * 2.5
-            
-        # Update axes and grid size to match the scale
-        # Use animation by setting target
-        self.target_axes_size = target_dist / 2
-            
-        # Get current camera state
+
         current_cam = self.cameraParams()
-        
-        # Setup animation
+
         self.start_state = {
             'distance': current_cam['distance'],
             'elevation': current_cam['elevation'],
             'azimuth': current_cam['azimuth'],
             'pan_x': self.pan_offset.x(),
             'pan_y': self.pan_offset.y(),
-            'axes_size': self.current_axes_size
         }
-        
+
         self.target_state = {
             'distance': target_dist,
-            'elevation': current_cam['elevation'], # Maintain current rotation
-            'azimuth': current_cam['azimuth'],     # Maintain current rotation
-            'pan_x': 0,                            # Reset pan to center origin
+            'elevation': current_cam['elevation'],
+            'azimuth': current_cam['azimuth'],
+            'pan_x': 0,
             'pan_y': 0,
-            'axes_size': self.target_axes_size
         }
-        
+
         self.animation_start_time = QTime.currentTime()
-        self.animation_timer.start(16) # ~60 FPS
+        self.animation_timer.start(16)
 
     def mouseMoveEvent(self, ev):
         """
@@ -701,103 +762,69 @@ class Viewer3D(gl.GLViewWidget):
         cam_params = self.cameraParams()
         dist = cam_params['distance']
         self.setCameraPosition(distance=dist * factor)
+        self.update_coordinate_system()
         
         ev.accept()
 
     def start_reset_animation(self, full_reset=True):
-        """
-        Start the camera reset animation.
-        
-        Args:
-            full_reset (bool): If True, resets zoom and axes scale to defaults.
-                               If False, keeps current zoom and axes scale.
-        """
         current_params = self.cameraParams()
-        
+
         if full_reset:
-            # Reset axes size to initial default
-            self.target_axes_size = 20
             target_distance = self.initial_state['distance']
         else:
-            # Keep current axes size and distance
-            self.target_axes_size = self.current_axes_size
             target_distance = current_params['distance']
-        
-        # Calculate shortest path for azimuth
+
         current_azim = current_params['azimuth']
         target_azim = self.initial_state['azimuth']
-        
         diff = target_azim - current_azim
-        # Normalize diff to [-180, 180] to find shortest path
         diff = (diff + 180) % 360 - 180
-        
-        # The actual target value for interpolation might be outside 0-360 
-        # to ensure smoothness from current value
         effective_target_azim = current_azim + diff
-        
-        # Capture start state
+
         self.start_state = {
             'distance': current_params['distance'],
             'elevation': current_params['elevation'],
             'azimuth': current_params['azimuth'],
             'pan_x': self.pan_offset.x(),
             'pan_y': self.pan_offset.y(),
-            'axes_size': self.current_axes_size
         }
-        
-        # Set target state
-        self.target_state = self.initial_state.copy()
-        self.target_state['distance'] = target_distance # Use determined target distance
-        self.target_state['azimuth'] = effective_target_azim # Use the calculated shortest path target
-        self.target_state['pan_x'] = 0
-        self.target_state['pan_y'] = 0
-        self.target_state['axes_size'] = self.target_axes_size
-        
-        # Start animation timer
+
+        self.target_state = {
+            'distance': target_distance,
+            'elevation': self.initial_state['elevation'],
+            'azimuth': effective_target_azim,
+            'pan_x': 0,
+            'pan_y': 0,
+        }
+
         self.animation_start_time = QTime.currentTime()
-        self.animation_timer.start(16) # ~60 FPS
+        self.animation_timer.start(16)
 
     def update_animation(self):
-        """
-        Update camera position for animation frame.
-        """
         if not self.animation_start_time:
             return
-            
+
         elapsed = self.animation_start_time.msecsTo(QTime.currentTime())
         progress = elapsed / self.animation_duration
-        
+
         if progress >= 1.0:
             progress = 1.0
             self.animation_timer.stop()
-            
-        # Ease-out cubic function for smooth "elegant" feel
-        # t = progress - 1
-        # ease = t * t * t + 1
-        # Or simple ease-out-quad
+
         ease = 1 - (1 - progress) * (1 - progress)
-        
-        # Interpolate values
+
         new_dist = self.start_state['distance'] + (self.target_state['distance'] - self.start_state['distance']) * ease
         new_elev = self.start_state['elevation'] + (self.target_state['elevation'] - self.start_state['elevation']) * ease
         new_azim = self.start_state['azimuth'] + (self.target_state['azimuth'] - self.start_state['azimuth']) * ease
-        
-        # Interpolate pan offset
+
         new_pan_x = self.start_state['pan_x'] + (self.target_state['pan_x'] - self.start_state['pan_x']) * ease
         new_pan_y = self.start_state['pan_y'] + (self.target_state['pan_y'] - self.start_state['pan_y']) * ease
         self.pan_offset.setX(new_pan_x)
         self.pan_offset.setY(new_pan_y)
-        
-        # Interpolate axes size
-        if 'axes_size' in self.start_state and 'axes_size' in self.target_state:
-            new_axes_size = self.start_state['axes_size'] + (self.target_state['axes_size'] - self.start_state['axes_size']) * ease
-            self.update_axes_size(new_axes_size)
-        
-        # Update standard camera params
+
         self.setCameraPosition(
             distance=new_dist,
             elevation=new_elev,
             azimuth=new_azim
-            # Center remains (0,0,0) so we don't need to interpolate it
         )
-        self.update() # Ensure redraw for pan offset update
+        self.update_coordinate_system()
+        self.update()
