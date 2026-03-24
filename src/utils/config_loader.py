@@ -20,7 +20,8 @@ class ConfigLoader:
             "enabled": True,
             "port": "COM3",
             "baudrate": 115200,
-            "timeout": 1
+            "timeout": 1,
+            "protocol": "csv"
         },
         "render_debug": {
             "enabled": False,

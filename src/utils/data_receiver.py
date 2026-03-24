@@ -4,6 +4,7 @@ import threading
 import time
 import serial
 from PySide6.QtCore import QObject, Signal
+from ATKMS901M_resolver import MS901MStreamParser
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +38,14 @@ class DataReceiver(QObject):
             
         serial_config = self.config_loader.get_serial_config()
         if serial_config.get('enabled', False):
-            self.serial_thread = threading.Thread(target=self._serial_loop, args=(serial_config,), daemon=True)
+            protocol = serial_config.get('protocol', 'csv')
+            if protocol == 'atkms901m':
+                target = self._serial_binary_loop
+            else:
+                target = self._serial_loop
+            self.serial_thread = threading.Thread(target=target, args=(serial_config,), daemon=True)
             self.serial_thread.start()
-            logger.info("Serial Receiver started on %s @ %s", serial_config['port'], serial_config['baudrate'])
+            logger.info("Serial Receiver started on %s @ %s (protocol=%s)", serial_config['port'], serial_config['baudrate'], protocol)
 
     def stop(self):
         """Stop all receiver threads."""
@@ -174,6 +180,58 @@ class DataReceiver(QObject):
                         logger.warning("Serial Read Error: %s", e)
                         break
                         
+            except serial.SerialException as e:
+                logger.warning("Serial Connection Error (%s): %s", port, e)
+                time.sleep(2)
+            except OSError as e:
+                logger.error("Unexpected Serial Error: %s", e)
+                time.sleep(2)
+            finally:
+                if self.serial_port and self.serial_port.is_open:
+                    self.serial_port.close()
+
+    def _serial_binary_loop(self, config):
+        """Loop for receiving ATK-MS901M binary serial data."""
+        port = config.get('port', 'COM3')
+        baudrate = config.get('baudrate', 115200)
+        timeout = config.get('timeout', 1)
+        acc_fsr = config.get('acc_fsr', 4)
+        gyro_fsr = config.get('gyro_fsr', 2000)
+
+        parser = MS901MStreamParser(acc_fsr=acc_fsr, gyro_fsr=gyro_fsr)
+
+        while self.running:
+            try:
+                self.serial_port = serial.Serial(port, baudrate, timeout=timeout)
+                logger.info("Serial port %s opened (ATK-MS901M binary mode).", port)
+
+                while self.running and self.serial_port.is_open:
+                    try:
+                        waiting = self.serial_port.in_waiting
+                        if waiting > 0:
+                            raw = self.serial_port.read(waiting)
+                        else:
+                            raw = self.serial_port.read(1)
+                            if not raw:
+                                continue
+
+                        self.raw_data_received.emit(
+                            "serial",
+                            raw.hex(' ')
+                        )
+
+                        snapshots = parser.feed(raw)
+                        for snap in snapshots:
+                            self.raw_data_received.emit(
+                                "serial",
+                                MS901MStreamParser.format_debug(snap)
+                            )
+                            self.data_received.emit("serial", None, snap)
+
+                    except (serial.SerialException, OSError) as e:
+                        logger.warning("Serial Read Error (binary): %s", e)
+                        break
+
             except serial.SerialException as e:
                 logger.warning("Serial Connection Error (%s): %s", port, e)
                 time.sleep(2)

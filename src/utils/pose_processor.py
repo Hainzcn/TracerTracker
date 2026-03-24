@@ -100,6 +100,7 @@ class PoseProcessor(QObject):
         acc_vec = None
         gyr_vec = None
         mag_vec = None
+        quat_vec = None
         
         # Find the relevant points for this source/prefix
         matched_points = 0
@@ -132,6 +133,8 @@ class PoseProcessor(QObject):
                 gyr_vec = self._extract_vector(p, data)
             elif purpose == "magnetic_field":
                 mag_vec = self._extract_vector(p, data)
+            elif purpose == "quaternion":
+                quat_vec = self._extract_quaternion(p, data)
 
         # If we don't have at least accelerometer data, we can't calculate displacement
         if acc_vec is None:
@@ -175,16 +178,13 @@ class PoseProcessor(QObject):
             has_gravity = True
             
         # Initialize orientation if this is the first frame with gravity
-        if has_gravity and not self.initialized:
+        if has_gravity and not self.initialized and quat_vec is None:
             self._initialize_orientation(acc_vec, mag_vec)
-            # Skip the first frame integration to avoid jumps
             return
 
         linear_acc = acc_vec
         
         debug_msg = []
-        
-        # Only log every 10 frames to avoid spamming the UI
         should_log = (self.frame_count % 10 == 0)
 
         if should_log:
@@ -192,14 +192,13 @@ class PoseProcessor(QObject):
             debug_msg.append(f"Gravity Removed: {'YES' if has_gravity else 'NO (Raw)'}")
 
         if has_gravity:
-            # Update orientation if Gyro is available
-            if gyr_vec is not None:
-                # Convert gyro from deg/s to rad/s if necessary
-                # Assuming config multiplier handles unit conversion to standard units.
-                # Standard unit for Madgwick is rad/s.
-                # If the user didn't specify, we assume rad/s.
-                
-                # Update quaternion
+            if quat_vec is not None:
+                # Use module-reported quaternion directly (skip Madgwick)
+                self.q = quat_vec
+                self.initialized = True
+                if should_log:
+                    debug_msg.append("Q from module (direct)")
+            elif gyr_vec is not None:
                 if mag_vec is not None:
                     self.q = self._madgwick_update_9dof(self.q, gyr_vec, acc_vec, mag_vec, dt)
                     if should_log: debug_msg.append("Updated Q (9DOF)")
@@ -207,13 +206,7 @@ class PoseProcessor(QObject):
                     self.q = self._madgwick_update_6dof(self.q, gyr_vec, acc_vec, dt)
                     if should_log: debug_msg.append("Updated Q (6DOF)")
             
-            # Rotate Acc (Body) to Earth Frame
-            # a_earth = q * a_body * q_conj
             acc_earth = self._rotate_vector(acc_vec, self.q)
-            
-            # Remove gravity (assuming Earth frame Z is up, so gravity is [0, 0, -9.8] or [0, 0, 9.8]?)
-            # Usually gravity points DOWN. So in Earth frame, accelerometer measures reaction force UP [0, 0, g].
-            # So we subtract [0, 0, g].
             linear_acc = acc_earth - np.array([0.0, 0.0, self.gravity])
             
             if should_log:
@@ -277,6 +270,40 @@ class PoseProcessor(QObject):
                 pass
         except (IndexError, ValueError, TypeError, KeyError) as e:
             self.log_message.emit(f"Error extracting vector for {config.get('name')}: {str(e)}")
+        return None
+
+    def _extract_quaternion(self, config, data):
+        """Extract a quaternion [w, x, y, z] from data using config indices."""
+        try:
+            w_cfg = config.get("w", {})
+            x_cfg = config.get("x", {})
+            y_cfg = config.get("y", {})
+            z_cfg = config.get("z", {})
+
+            w_idx = w_cfg.get("index", 0)
+            x_idx = x_cfg.get("index", 1)
+            y_idx = y_cfg.get("index", 2)
+            z_idx = z_cfg.get("index", 3)
+
+            w_mult = w_cfg.get("multiplier", 1.0)
+            x_mult = x_cfg.get("multiplier", 1.0)
+            y_mult = y_cfg.get("multiplier", 1.0)
+            z_mult = z_cfg.get("multiplier", 1.0)
+
+            max_idx = max(w_idx, x_idx, y_idx, z_idx)
+            if len(data) > max_idx:
+                q = np.array([
+                    float(data[w_idx]) * w_mult,
+                    float(data[x_idx]) * x_mult,
+                    float(data[y_idx]) * y_mult,
+                    float(data[z_idx]) * z_mult
+                ])
+                norm = np.linalg.norm(q)
+                if norm > 0:
+                    q /= norm
+                return q
+        except (IndexError, ValueError, TypeError, KeyError) as e:
+            self.log_message.emit(f"Error extracting quaternion for {config.get('name')}: {str(e)}")
         return None
 
     def _rotate_vector(self, v, q):
