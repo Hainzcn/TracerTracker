@@ -8,7 +8,6 @@ class ConfigLoader:
     _instance = None
     _config = {}
     
-    # Default configuration
     DEFAULT_CONFIG = {
         "gravity_reference": 10.00,
         "udp": {
@@ -62,7 +61,7 @@ class ConfigLoader:
         return cls._instance
 
     def load_config(self):
-        """Load configuration from config.json or use defaults."""
+        """从 config.json 加载配置，或者使用默认配置"""
         config_path = os.path.join(os.getcwd(), 'config.json')
         
         if os.path.exists(config_path):
@@ -70,7 +69,7 @@ class ConfigLoader:
                 with open(config_path, 'r', encoding='utf-8') as f:
                     self._config = json.load(f)
                     logger.info("Configuration loaded from %s", config_path)
-                    # Ensure gravity_reference is present if not in file
+                    # 如果文件中没有 gravity_reference，确保其存在
                     if "gravity_reference" not in self._config:
                         self._config["gravity_reference"] = self.DEFAULT_CONFIG["gravity_reference"]
             except Exception as e:
@@ -82,7 +81,7 @@ class ConfigLoader:
             self.save_config()
 
     def save_config(self):
-        """Save current configuration to config.json."""
+        """将当前配置保存到 config.json"""
         config_path = os.path.join(os.getcwd(), 'config.json')
         try:
             with open(config_path, 'w', encoding='utf-8') as f:
@@ -92,7 +91,7 @@ class ConfigLoader:
             logger.error("Error saving config: %s", e)
 
     def get(self, key, default=None):
-        """Get a configuration value."""
+        """获取配置值"""
         return self._config.get(key, default)
     
     def get_udp_config(self):

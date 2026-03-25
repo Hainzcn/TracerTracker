@@ -8,9 +8,9 @@ import pyqtgraph.opengl as gl
 
 class AttitudeWidget(QWidget):
     """
-    Overlay widget displaying a 3D attitude cube with orientation text.
-    Intended to be placed at the top-right corner of the main 3D view.
-    Hidden by default; becomes visible once attitude data is received.
+    显示 3D 姿态立方体和方向文本的叠加部件。
+    旨在放置在主 3D 视图的右上角。
+    默认隐藏；一旦接收到姿态数据即变为可见。
     """
 
     def __init__(self, parent=None):
@@ -47,7 +47,7 @@ class AttitudeWidget(QWidget):
         self.setVisible(False)
 
     def update_quaternion(self, q0, q1, q2, q3):
-        """Rotate cube by quaternion and display quaternion values."""
+        """根据四元数旋转立方体并显示四元数值。"""
         if not self._has_data:
             self._has_data = True
             self.setVisible(True)
@@ -57,14 +57,14 @@ class AttitudeWidget(QWidget):
         )
 
     def update_euler(self, roll, pitch, yaw):
-        """Rotate cube by euler angles (degrees) and display values."""
+        """根据欧拉角（度）旋转立方体并显示数值。"""
         if not self._has_data:
             self._has_data = True
             self.setVisible(True)
         self.cube_view.set_rotation_euler(roll, pitch, yaw)
         self.label.setText(f"R:{roll:+7.1f}\u00b0  P:{pitch:+7.1f}\u00b0\nY:{yaw:+7.1f}\u00b0")
 
-    # Let mouse events fall through to the 3D view underneath
+    # 让鼠标事件穿透到下方的 3D 视图
     def mousePressEvent(self, ev):
         ev.ignore()
 
@@ -79,7 +79,7 @@ class AttitudeWidget(QWidget):
 
 
 class _CubeGLWidget(gl.GLViewWidget):
-    """Small non-interactive GL widget that renders a coloured attitude cube."""
+    """渲染彩色姿态立方体的小型非交互式 GL 部件。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -87,7 +87,7 @@ class _CubeGLWidget(gl.GLViewWidget):
         self.setCameraPosition(distance=4.5, elevation=25, azimuth=-45)
         self._build_scene()
 
-    # ---- scene construction ------------------------------------------------
+    # ---- 场景构建 ------------------------------------------------
 
     def _build_scene(self):
         verts, faces, colors = self._cube_geometry()
@@ -129,7 +129,7 @@ class _CubeGLWidget(gl.GLViewWidget):
 
     @staticmethod
     def _cube_geometry():
-        """Vertices, triangle-faces, and per-face RGBA colours for a unit cube."""
+        """单位立方体的顶点、三角形面和每面 RGBA 颜色。"""
         s = 0.7
         verts = np.array(
             [
@@ -146,12 +146,12 @@ class _CubeGLWidget(gl.GLViewWidget):
         )
         faces = np.array(
             [
-                [4, 5, 6], [4, 6, 7],   # Z+  blue
-                [1, 0, 3], [1, 3, 2],   # Z-  dark blue
-                [1, 2, 6], [1, 6, 5],   # X+  red
-                [0, 4, 7], [0, 7, 3],   # X-  dark red
-                [3, 7, 6], [3, 6, 2],   # Y+  green
-                [0, 1, 5], [0, 5, 4],   # Y-  dark green
+                [4, 5, 6], [4, 6, 7],   # Z+  蓝色
+                [1, 0, 3], [1, 3, 2],   # Z-  深蓝色
+                [1, 2, 6], [1, 6, 5],   # X+  红色
+                [0, 4, 7], [0, 7, 3],   # X-  深红色
+                [3, 7, 6], [3, 6, 2],   # Y+  绿色
+                [0, 1, 5], [0, 5, 4],   # Y-  深绿色
             ],
             dtype=np.uint32,
         )
@@ -168,16 +168,16 @@ class _CubeGLWidget(gl.GLViewWidget):
         )
         return verts, faces, colors
 
-    # ---- rotation setters --------------------------------------------------
+    # ---- 旋转设置 --------------------------------------------------
 
     def _apply_body_transform(self, tr):
-        """Apply the same transform to the cube and all body-frame items."""
+        """将相同的变换应用到立方体和所有机体坐标系项目。"""
         for item in self._body_items:
             item.setTransform(tr)
         self.update()
 
     def set_rotation_quaternion(self, q0, q1, q2, q3):
-        """Apply rotation from quaternion (w=q0, x=q1, y=q2, z=q3)."""
+        """应用来自四元数 (w=q0, x=q1, y=q2, z=q3) 的旋转。"""
         w, x, y, z = q0, q1, q2, q3
         n2 = w * w + x * x + y * y + z * z
         if n2 < 1e-12:
@@ -200,7 +200,7 @@ class _CubeGLWidget(gl.GLViewWidget):
         self._apply_body_transform(tr)
 
     def set_rotation_euler(self, roll_deg, pitch_deg, yaw_deg):
-        """Apply rotation from euler angles (degrees), order Z-Y-X."""
+        """应用来自欧拉角（度）的旋转，顺序 Z-Y-X。"""
         r = math.radians(roll_deg)
         p = math.radians(pitch_deg)
         y = math.radians(yaw_deg)
@@ -219,7 +219,7 @@ class _CubeGLWidget(gl.GLViewWidget):
         )
         self._apply_body_transform(tr)
 
-    # ---- disable mouse interaction -----------------------------------------
+    # ---- 禁用鼠标交互 -----------------------------------------
 
     def mousePressEvent(self, ev):
         ev.ignore()

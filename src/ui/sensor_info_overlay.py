@@ -5,8 +5,7 @@ from PySide6.QtCore import Qt
 
 class SensorInfoOverlay(QWidget):
     """
-    Semi-transparent overlay at the bottom-left of the 3D view showing
-    acceleration, velocity, and altitude-change information.
+    位于 3D 视图左下角的半透明叠加层，显示加速度、速度和海拔变化信息。
     """
 
     def __init__(self, parent=None):
@@ -52,22 +51,21 @@ class SensorInfoOverlay(QWidget):
         self.setVisible(False)
 
     def update_acceleration(self, ax, ay, az):
-        """Update displayed acceleration (m/s^2)."""
+        """更新显示的加速度 (m/s^2)。"""
         if not self._has_data:
             self._has_data = True
             self.setVisible(True)
         self.acc_label.setText(f"ACC: {ax:+8.2f} {ay:+8.2f} {az:+8.2f} m/s\u00b2")
 
     def update_velocity(self, vx, vy, vz):
-        """Update displayed velocity (m/s)."""
+        """更新显示的速度 (m/s)。"""
         self.vel_label.setText(f"VEL: {vx:+8.3f} {vy:+8.3f} {vz:+8.3f} m/s")
 
     def update_altitude(self, pressure=None, altitude=None):
         """
-        Update altitude change display.
-        Uses direct altitude value if provided.  Falls back to barometric
-        formula: h = 44330 * (1 - (P/P0)^(1/5.255)) with the first
-        received pressure as P0.
+        更新海拔变化显示。
+        如果提供了直接的海拔值，则使用该值。否则回退到气压公式：
+        h = 44330 * (1 - (P/P0)^(1/5.255))，其中 P0 为收到的第一个气压值。
         """
         if altitude is not None and altitude != 0.0:
             if self._ref_altitude is None:
@@ -82,7 +80,7 @@ class SensorInfoOverlay(QWidget):
             h_now = 44330.0 * (1.0 - math.pow(pressure / self._ref_pressure, 1.0 / 5.255))
             self.alt_label.setText(f"\u0394Alt: {h_now:+8.2f} m  (P={pressure:.0f} Pa)")
 
-    # Let mouse events fall through
+    # 让鼠标事件穿透
     def mousePressEvent(self, ev):
         ev.ignore()
 

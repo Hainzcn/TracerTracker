@@ -277,25 +277,24 @@ def parse_ms901m_raw_data(raw_hex_str, ext_port_mode="analog"):
 
 
 # ---------------------------------------------------------------------------
-# Real-time binary stream parser for ATK-MS901M
+# ATK-MS901M 实时二进制流解析器
 # ---------------------------------------------------------------------------
 
 class MS901MStreamParser:
     """
-    Stateful byte-stream parser for ATK-MS901M binary UART protocol.
-    Accepts raw bytes via feed(), extracts and validates frames, aggregates
-    the latest data from each frame type, and yields combined float-list
-    snapshots triggered by frame 0x03 (gyro+acc) arrival.
+    ATK-MS901M 二进制 UART 协议的状态字节流解析器。
+    通过 feed() 接收原始字节，提取并验证帧，汇总每种帧类型的最新数据，
+    并在收到 0x03 帧（陀螺仪+加速度）时输出合并的浮点列表快照。
 
-    Combined output index mapping:
-      [0-2]   ax, ay, az       (m/s², from frame 0x03)
-      [3-5]   gx, gy, gz       (rad/s, from frame 0x03)
-      [6-9]   q0, q1, q2, q3   (from frame 0x02)
-      [10-12] mx, my, mz       (raw, from frame 0x04)
-      [13]    temperature       (°C, from frame 0x04)
-      [14-16] roll, pitch, yaw  (°, from frame 0x01)
-      [17]    pressure          (Pa, from frame 0x05)
-      [18]    altitude          (m, from frame 0x05)
+    合并输出索引映射：
+      [0-2]   ax, ay, az       (m/s², 来自 0x03 帧)
+      [3-5]   gx, gy, gz       (rad/s, 来自 0x03 帧)
+      [6-9]   q0, q1, q2, q3   (来自 0x02 帧)
+      [10-12] mx, my, mz       (原始值, 来自 0x04 帧)
+      [13]    温度             (°C, 来自 0x04 帧)
+      [14-16] roll, pitch, yaw (°, 来自 0x01 帧)
+      [17]    气压             (Pa, 来自 0x05 帧)
+      [18]    海拔             (m, 来自 0x05 帧)
     """
 
     HEADER = bytes([0x55, 0x55])
@@ -326,9 +325,8 @@ class MS901MStreamParser:
 
     def feed(self, data):
         """
-        Append *data* (bytes / bytearray) to the internal buffer, parse all
-        complete frames, and return a list of combined snapshot float-lists
-        (one per trigger-frame 0x03 received).
+        将 *data* (bytes / bytearray) 追加到内部缓冲区，解析所有完整帧，
+        并返回合并后的快照浮点列表（每收到一个 0x03 触发帧返回一个）。
         """
         self._buffer.extend(data)
         snapshots = []
@@ -354,9 +352,9 @@ class MS901MStreamParser:
 
     @staticmethod
     def format_debug(snapshot):
-        """Return a human-readable summary of a snapshot list."""
+        """返回快照列表的人类可读摘要。"""
         if snapshot is None or len(snapshot) < 19:
-            return "Invalid snapshot"
+            return "无效快照"
         return (
             f"ACC({snapshot[0]:.2f},{snapshot[1]:.2f},{snapshot[2]:.2f}) "
             f"GYR({snapshot[3]:.2f},{snapshot[4]:.2f},{snapshot[5]:.2f}) "
@@ -369,8 +367,8 @@ class MS901MStreamParser:
 
     def _try_extract_frame(self):
         """
-        Scan the buffer for the next complete, checksum-valid frame.
-        Returns (frame_id, data_bytes) or None.
+        扫描缓冲区以查找下一个完整且校验和有效的帧。
+        返回 (frame_id, data_bytes) 或 None。
         """
         while True:
             idx = self._buffer.find(self.HEADER)
@@ -471,8 +469,7 @@ class MS901MStreamParser:
 
     def _build_snapshot(self):
         """
-        Combine the latest parsed data from all frame types into one flat
-        float list.  Requires frame 0x03 at minimum.
+        合并来自所有帧类型的最新解析数据。至少需要 0x03 帧。
         """
         imu = self._latest.get(0x03)
         if imu is None:

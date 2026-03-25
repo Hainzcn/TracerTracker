@@ -29,7 +29,7 @@ class PoseProcessor(QObject):
         self.last_time = time.time()
         self.initialized = False
 
-        # Quaternion [w, x, y, z]: sensor -> earth
+        # 四元数 [w, x, y, z]: 传感器 -> 地球
         self.q = np.array([1.0, 0.0, 0.0, 0.0])
 
         self.beta = 0.1
@@ -37,11 +37,11 @@ class PoseProcessor(QObject):
         self.gravity = self.config_loader.get("gravity_reference", 9.81)
 
     # ------------------------------------------------------------------
-    # Main entry point
+    # 主入口点
     # ------------------------------------------------------------------
 
     def process(self, source, prefix, data):
-        """Process an incoming data packet and update pose estimation."""
+        """处理输入数据包并更新位姿估计。"""
         points_config = self.config_loader.get("points", [])
 
         acc_vec = None
@@ -236,7 +236,7 @@ class PoseProcessor(QObject):
         return None
 
     def _extract_quaternion(self, config, data):
-        """Extract a quaternion [w, x, y, z] from data using config indices."""
+        """从数据中根据配置索引提取四元数 [w, x, y, z]。"""
         try:
             w_cfg = config.get("w", {})
             x_cfg = config.get("x", {})

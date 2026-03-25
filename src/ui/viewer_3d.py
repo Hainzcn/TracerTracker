@@ -12,20 +12,20 @@ logger = logging.getLogger(__name__)
 
 class Viewer3D(gl.GLViewWidget):
     """
-    A custom 3D viewer widget based on pyqtgraph.opengl.GLViewWidget.
-    Implements specific mouse interactions:
-    - Left Click & Drag: Rotate (Orbit)
-    - Right Click & Drag: Pan (Move)
-    - Middle Click: Reset View (Animated)
-    - Scroll Wheel: Zoom
+    基于 pyqtgraph.opengl.GLViewWidget 的自定义 3D 查看器组件。
+    鼠标交互方式：
+    - 左键拖动：旋转（轨道）
+    - 右键拖动：平移
+    - 中键点击：复位视角（动画过渡）
+    - 滚轮：缩放
     """
-    # Signal emitted for debug logging
+    # 调试日志信号
     log_message = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         
-        # Initial camera settings
+        # 相机初始状态
         self.initial_state = {
             'distance': 80,
             'elevation': 45,
@@ -33,20 +33,20 @@ class Viewer3D(gl.GLViewWidget):
             'center': QVector3D(0, 0, 0)
         }
         
-        # Set up the camera and background
+        # 初始化相机与背景
         self.setCameraPosition(
             distance=self.initial_state['distance'],
             elevation=self.initial_state['elevation'],
             azimuth=self.initial_state['azimuth']
         )
-        self.setBackgroundColor('#121212')  # Dark high-end background
+        self.setBackgroundColor('#121212')  # 深色背景
 
-        # Coordinate system visual parameters (must be set before add_custom_axes)
+        # 坐标系视觉参数（必须在 add_custom_axes 之前设置）
         self.AXIS_VISUAL_RATIO = 0.35
         self.TICK_LABEL_POOL_SIZE = 30
         self.TICK_LINE_LENGTH_RATIO = 0.02
         
-        # Dual-layer XOY grid: major lines align with axis ticks, minor lines subdivide
+        # 双层 XOY 网格：主网格对齐刻度，副网格细分
         self.grid_major = gl.GLGridItem()
         self.grid_major.setColor((0, 255, 255, 40))
         self.addItem(self.grid_major)
@@ -55,11 +55,10 @@ class Viewer3D(gl.GLViewWidget):
         self.grid_minor.setColor((0, 255, 255, 20))
         self.addItem(self.grid_minor)
         
-        # Add custom thickened and extended axes
+        # 添加加粗加长的自定义坐标轴
         self.add_custom_axes()
         
-        # Tracked points
-        self.points = {} # Dict to store point items: {name: GLScatterPlotItem}
+        self.points = {}  # {名称: GLScatterPlotItem}
         self.point_histories = {}
         self.point_speeds = {}
         self.point_times = {}
@@ -73,29 +72,27 @@ class Viewer3D(gl.GLViewWidget):
         self.trail_width_max = 6.0
         self.max_history_length = 10000
         
-        # State for adaptive scaling
+        # 自适应缩放状态
         self.first_point_rendered = False
         
-        # Interaction state
         self.mousePos = QPoint()
         
-        # Custom camera pan offset (screen space translation)
+        # 自定义相机平移偏移（屏幕空间平移）
         self.pan_offset = QVector3D(0, 0, 0)
         
-        # Enable keyboard focus
+        # 启用键盘焦点
         self.setFocusPolicy(Qt.StrongFocus)
         
-        # Long press state for middle click
+        # 中键长按状态
         self.long_press_timer = QTimer(self)
         self.long_press_timer.setSingleShot(True)
         self.long_press_timer.timeout.connect(self.on_long_press_timeout)
         self.is_long_press = False
         
-        # Animation state
         self.animation_timer = QTimer(self)
         self.animation_timer.timeout.connect(self.update_animation)
         self.animation_start_time = None
-        self.animation_duration = 800  # ms
+        self.animation_duration = 800  # 毫秒
         self.start_state = {}
         self.target_state = {}
         self.render_debug_enabled = os.getenv("TRACER_RENDER_DEBUG", "0") == "1"
@@ -213,12 +210,12 @@ class Viewer3D(gl.GLViewWidget):
         self.y_label = self._create_axis_label('Y', [0.0, 20.0, 0.0], label_color)
         self.z_label = self._create_axis_label('Z', [0.0, 0.0, 20.0], label_color)
 
-        # Tick marks: single GLLinePlotItem holding all tick geometry
+        # 刻度线：用单个 GLLinePlotItem 容纳所有刻度几何体
         self.tick_line_item = gl.GLLinePlotItem(width=1.5, antialias=True, mode='lines')
         self.tick_line_item.setGLOptions('translucent')
         self.addItem(self.tick_line_item)
 
-        # Tick labels: pre-allocated pool of GLTextItem
+        # 刻度标签：预分配的 GLTextItem 对象池
         self.tick_label_pool = []
         tick_label_color = QColor(180, 180, 180, 200)
         for _ in range(self.TICK_LABEL_POOL_SIZE):
@@ -235,7 +232,7 @@ class Viewer3D(gl.GLViewWidget):
         neg_ext = -axis_length * 0.5
         pos_ext = axis_length
 
-        # --- axis lines ---
+        # --- 坐标轴线 ---
         self.x_axis.setData(
             pos=np.array([[neg_ext, 0, 0], [pos_ext, 0, 0]], dtype=np.float32),
             color=(1, 0, 0, 1))
@@ -246,7 +243,7 @@ class Viewer3D(gl.GLViewWidget):
             pos=np.array([[0, 0, neg_ext], [0, 0, pos_ext]], dtype=np.float32),
             color=(0, 0, 1, 1))
 
-        # --- axis name labels ---
+        # --- 坐标轴名称标签 ---
         label_offset = pos_ext * 1.08
         if self.x_label is not None:
             self.x_label.setData(pos=np.array([label_offset, 0, 0], dtype=np.float32))
@@ -255,7 +252,7 @@ class Viewer3D(gl.GLViewWidget):
         if self.z_label is not None:
             self.z_label.setData(pos=np.array([0, 0, label_offset], dtype=np.float32))
 
-        # --- tick computation ---
+        # --- 刻度计算 ---
         total_range = pos_ext - neg_ext
         interval = self._compute_nice_interval(total_range, target_ticks=6)
         tick_half = axis_length * self.TICK_LINE_LENGTH_RATIO
@@ -265,10 +262,10 @@ class Viewer3D(gl.GLViewWidget):
         label_idx = 0
 
         axis_defs = [
-            # (main_axis_index, color_rgba, perp_offsets: two perpendicular directions)
-            (0, (1.0, 0.3, 0.3, 0.7), (1, 2)),  # X axis
-            (1, (0.3, 1.0, 0.3, 0.7), (0, 2)),  # Y axis
-            (2, (0.3, 0.3, 1.0, 0.7), (0, 1)),  # Z axis
+            # (主轴索引, RGBA 颜色, 两个垂直方向的索引)
+            (0, (1.0, 0.3, 0.3, 0.7), (1, 2)),  # X 轴
+            (1, (0.3, 1.0, 0.3, 0.7), (0, 2)),  # Y 轴
+            (2, (0.3, 0.3, 1.0, 0.7), (0, 1)),  # Z 轴
         ]
 
         for main_ax, color, (perp_a, perp_b) in axis_defs:
@@ -277,7 +274,7 @@ class Viewer3D(gl.GLViewWidget):
                 for sign_val in ([val, -val] if val > 1e-9 else [val]):
                     if sign_val < neg_ext - 1e-9 or sign_val > pos_ext + 1e-9:
                         continue
-                    # tick line perpendicular to the axis (along perp_a)
+                    # 垂直于坐标轴的刻度线（沿 perp_a 方向）
                     p1 = np.zeros(3, dtype=np.float32)
                     p2 = np.zeros(3, dtype=np.float32)
                     p1[main_ax] = sign_val
@@ -289,7 +286,7 @@ class Viewer3D(gl.GLViewWidget):
                     tick_colors.append(color)
                     tick_colors.append(color)
 
-                    # tick label
+                    # 刻度标签
                     if label_idx < self.TICK_LABEL_POOL_SIZE:
                         lbl = self.tick_label_pool[label_idx]
                         lbl_pos = np.zeros(3, dtype=np.float32)
@@ -309,11 +306,11 @@ class Viewer3D(gl.GLViewWidget):
                         label_idx += 1
                 val += interval
 
-        # hide unused labels
+        # 隐藏未使用的标签
         for i in range(label_idx, self.TICK_LABEL_POOL_SIZE):
             self.tick_label_pool[i].setVisible(False)
 
-        # update tick geometry
+        # 更新刻度几何体
         if len(tick_verts) >= 2:
             self.tick_line_item.setData(
                 pos=np.array(tick_verts, dtype=np.float32),
@@ -323,8 +320,8 @@ class Viewer3D(gl.GLViewWidget):
         else:
             self.tick_line_item.setVisible(False)
 
-        # --- grid (XOY plane) aligned with tick interval ---
-        # Snap half-extent to a multiple of interval so grid lines pass through origin
+        # --- 网格（XOY 平面），对齐刻度间隔 ---
+        # 将半幅值对齐到刻度间隔的整数倍，使网格线经过原点
         half_extent_raw = max(pos_ext * 2, 20)
         half_extent = math.ceil(half_extent_raw / max(interval, 1e-15)) * interval
         grid_extent = half_extent * 2
@@ -348,16 +345,14 @@ class Viewer3D(gl.GLViewWidget):
         self.grid_minor.setVisible(minor_alpha > 0)
         
     def update_point(self, name, x, y, z, color=(1, 0, 0, 1), size=10):
-        """
-        Update or create a tracked point in the 3D view.
-        """
+        """更新或创建 3D 视图中的追踪点。"""
         current_pos = np.array([x, y, z], dtype=float)
         if not np.isfinite(current_pos).all():
             self._render_debug("POINT_INVALID_POSITION", f"收到非法坐标: {current_pos.tolist()}", name, "ERROR")
             return
         pos = np.array([current_pos], dtype=np.float32)
         
-        # Adaptive scaling for the first point
+        # 首个点的自适应缩放
         if not self.first_point_rendered:
             dist = np.sqrt(x**2 + y**2 + z**2)
             cam_dist = self.cameraParams()['distance']
@@ -369,12 +364,7 @@ class Viewer3D(gl.GLViewWidget):
 
             self.first_point_rendered = True
         
-        # Convert color from list [r, g, b, a] (0-255) to tuple (0-1) if needed
-        # Or if passed as (0-1), use as is.
-        # Assuming input is tuple/list of floats 0-1 or 0-255.
-        # GLLinePlotItem uses 0-1. GLScatterPlotItem uses 0-1.
-        
-        # Normalize color if values > 1
+        # 颜色归一化：输入可能是 0-255 或 0-1 范围，统一转为 0-1
         color_arr = np.asarray(color, dtype=float).flatten()
         if color_arr.size == 0:
             self._render_debug("POINT_EMPTY_COLOR", "颜色为空，已回退到默认红色", name, "WARN")
@@ -392,11 +382,10 @@ class Viewer3D(gl.GLViewWidget):
         self.point_colors[name] = color_tuple
             
         if name in self.points:
-            # Update existing point
+            # 更新已有点
             self.points[name].setData(pos=pos, color=color_tuple, size=size)
         else:
-            # Create new point
-            # pxMode=True means size is in pixels, False means world units
+            # 创建新点（pxMode=True 表示大小单位为像素）
             sp = gl.GLScatterPlotItem(pos=pos, color=color_tuple, size=size, pxMode=True)
             sp.setGLOptions('translucent')
             self.addItem(sp)
@@ -448,18 +437,11 @@ class Viewer3D(gl.GLViewWidget):
 
     def set_trail_mode(self, enabled):
         target_mode = bool(enabled)
-        # Always log even if mode hasn't changed, or at least when it is triggered by UI
-        # But to match user request "send in window", we just ensure _render_debug emits.
-        # The user specifically mentioned lines 360 and 371.
-        
         if target_mode == self.trail_mode:
-            # If user clicks the checkbox, it might toggle even if internal state thinks it is same? 
-            # No, QCheckBox won't emit if state is same.
-            # But let's allow re-logging if useful. 
             pass
             
         self.trail_mode = target_mode
-        # Force emit log
+        # 强制发送日志
         self.log_message.emit(f"[Viewer3D][INFO][GLOBAL][MODE_TRAIL] 速度尾迹模式={'开启' if self.trail_mode else '关闭'}，当前点数量={len(self.points)}")
         
         if self.trail_mode:
@@ -472,7 +454,7 @@ class Viewer3D(gl.GLViewWidget):
 
     def set_trail_length(self, length):
         self.trail_length = max(10, int(length))
-        # Force emit log
+        # 强制发送日志
         self.log_message.emit(f"[Viewer3D][INFO][GLOBAL][TRAIL_LENGTH_UPDATE] 尾迹长度已更新为 {self.trail_length}")
         
         if self.trail_mode:
@@ -577,23 +559,21 @@ class Viewer3D(gl.GLViewWidget):
                 self._hide_trail_item(self.trail_items[name])
             
     def mousePressEvent(self, ev):
-        """
-        Handle mouse press events.
-        """
-        self.setFocus() # Ensure widget has focus for key events
+        """处理鼠标按下事件。"""
+        self.setFocus()  # 确保组件获得焦点以接收键盘事件
         self.mousePos = ev.pos()
         
-        # Middle button for reset animation
+        # 中键触发复位动画
         if ev.button() == Qt.MouseButton.MiddleButton:
-            # Start timer for long press (1 second)
+            # 启动长按计时器（1 秒）
             self.is_long_press = False
             self.long_press_timer.start(1000)
             ev.accept()
             return
             
-        # Accept the event if it's left or right button
+        # 左键或右键：接受事件
         if ev.button() == Qt.MouseButton.LeftButton or ev.button() == Qt.MouseButton.RightButton:
-            # Stop animation if user interacts
+            # 用户交互时停止动画
             if self.animation_timer.isActive():
                 self.animation_timer.stop()
             ev.accept()
@@ -601,36 +581,29 @@ class Viewer3D(gl.GLViewWidget):
             super().mousePressEvent(ev)
 
     def mouseReleaseEvent(self, ev):
-        """
-        Handle mouse release events.
-        """
+        """处理鼠标释放事件。"""
         if ev.button() == Qt.MouseButton.MiddleButton:
-            # If timer is still active, it's a short press
+            # 计时器仍在运行说明是短按
             if self.long_press_timer.isActive():
                 self.long_press_timer.stop()
                 if not self.is_long_press:
-                    # Short press: Partial Reset (Keep zoom/scale)
+                    # 短按：部分复位（保持缩放比例）
                     self.start_reset_animation(full_reset=False)
             
-            # Reset flag
+            # 重置标志
             self.is_long_press = False
             ev.accept()
         else:
             super().mouseReleaseEvent(ev)
 
     def on_long_press_timeout(self):
-        """
-        Called when middle button is held for 1 second.
-        Triggers full reset.
-        """
+        """中键按住超过 1 秒时触发完全复位。"""
         self.is_long_press = True
-        # Full Reset (Reset zoom/scale to defaults)
+        # 完全复位（缩放比例也恢复默认）
         self.start_reset_animation(full_reset=True)
 
     def keyPressEvent(self, ev):
-        """
-        Handle key press events.
-        """
+        """处理键盘按键事件。"""
         if ev.key() == Qt.Key_R:
             self.auto_fit_view()
             ev.accept()
@@ -639,10 +612,9 @@ class Viewer3D(gl.GLViewWidget):
 
     def auto_fit_view(self):
         """
-        Automatically adjust the view to fit all points.
-        Camera distance is set so that the furthest point sits comfortably
-        within the viewport. Axes, ticks, and grid follow automatically via
-        update_coordinate_system() called each animation frame.
+        自动调整视角以适配所有追踪点。
+        相机距离设为最远点的合适倍数，坐标轴、刻度和网格通过
+        update_coordinate_system() 在每个动画帧中自动跟随更新。
         """
         if not self.points:
             return
@@ -685,31 +657,22 @@ class Viewer3D(gl.GLViewWidget):
         self.animation_timer.start(16)
 
     def mouseMoveEvent(self, ev):
-        """
-        Handle mouse move events for rotation and panning.
-        """
+        """处理鼠标移动事件，实现旋转和平移。"""
         diff = ev.pos() - self.mousePos
         self.mousePos = ev.pos()
 
         if ev.buttons() == Qt.MouseButton.LeftButton:
-            # Rotate (Orbit)
+            # 旋转（轨道）
             self.orbit(diff.x(), diff.y())
             
         elif ev.buttons() == Qt.MouseButton.RightButton:
-            # Custom Pan (Move Camera in Screen Space)
-            # We want: Drag Down -> Content Moves Up
-            # In our viewMatrix logic, we apply translation(pan_x, pan_y, 0) first.
-            # Y is typically Up in OpenGL.
-            # Mouse diff.y() > 0 means drag down.
-            # If we want content to move up, we need pan_y to increase.
-            # So pan_y += diff.y() * scale
-            
+            # 屏幕空间平移：向下拖动 → 内容向上移动
             dist = self.cameraParams()['distance']
-            # Scale factor - adjust based on distance for consistent feel
+            # 缩放因子：根据相机距离调整，保持手感一致
             scale = dist * 0.001
             
             self.pan_offset.setX(self.pan_offset.x() + diff.x() * scale)
-            self.pan_offset.setY(self.pan_offset.y() - diff.y() * scale) # Inverted Y drag direction: Drag Down -> Content Moves Up
+            self.pan_offset.setY(self.pan_offset.y() - diff.y() * scale)  # Y 方向反转
             
             self.update()
             
@@ -718,48 +681,43 @@ class Viewer3D(gl.GLViewWidget):
 
     def viewMatrix(self):
         """
-        Override viewMatrix to include custom pan offset.
-        This ensures rotation always happens around the center (0,0,0) 
-        while allowing the view to be shifted (panned).
+        重写视图矩阵以加入自定义平移偏移。
+        旋转始终围绕原点 (0,0,0)，同时允许视图平移。
         """
         m = QMatrix4x4()
         
-        # Apply custom screen-space pan (translation)
-        # This shifts the viewport
+        # 应用屏幕空间平移
         m.translate(self.pan_offset.x(), self.pan_offset.y(), 0)
         
-        # Standard GLViewWidget view matrix logic
-        # Translate by distance (camera zoom)
+        # 标准 GLViewWidget 视图矩阵：按距离平移（相机缩放）
         m.translate(0, 0, -self.opts['distance'])
         
-        # Rotate around center
+        # 围绕中心旋转
         m.rotate(self.opts['elevation']-90, 1, 0, 0)
         m.rotate(self.opts['azimuth'], 0, 0, 1)
         
-        # Translate to center (which we keep as 0,0,0 for rotation pivot)
+        # 平移到中心点（保持 0,0,0 作为旋转支点）
         center = self.opts['center']
         m.translate(-center.x(), -center.y(), -center.z())
         
         return m
 
     def wheelEvent(self, ev):
-        """
-        Handle scroll wheel for zooming.
-        """
-        # Stop animation if user interacts
+        """处理滚轮缩放。"""
+        # 用户交互时停止动画
         if self.animation_timer.isActive():
             self.animation_timer.stop()
             
-        # Calculate scroll amount
+        # 计算滚动量
         delta = ev.angleDelta().y()
         
-        # Zoom factor
+        # 缩放因子
         if delta > 0:
             factor = 0.9
         else:
             factor = 1.1
             
-        # Apply zoom by changing camera distance
+        # 通过改变相机距离实现缩放
         cam_params = self.cameraParams()
         dist = cam_params['distance']
         self.setCameraPosition(distance=dist * factor)

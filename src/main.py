@@ -2,7 +2,7 @@ import sys
 import os
 import logging
 
-# Add the project root directory to sys.path to ensure imports work correctly
+# 设置项目根目录到 sys.path，确保模块导入正常
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)

@@ -10,11 +10,10 @@ logger = logging.getLogger(__name__)
 
 class DataReceiver(QObject):
     """
-    Handles data reception from UDP and Serial sources.
-    Emits 'data_received' signal with (source, prefix, parsed_data).
+    处理来自 UDP 和串口的数据接收。
+    发出 'data_received' 信号，携带 (source, prefix, parsed_data)。
     """
     data_received = Signal(str, str, list)
-    # Emits raw data: (source, raw_string)
     raw_data_received = Signal(str, str)
     
     def __init__(self, config_loader):
@@ -27,7 +26,7 @@ class DataReceiver(QObject):
         self.serial_port = None
 
     def start(self):
-        """Start receiver threads based on configuration."""
+        """根据配置启动接收线程"""
         self.running = True
         
         udp_config = self.config_loader.get_udp_config()
@@ -48,7 +47,7 @@ class DataReceiver(QObject):
             logger.info("Serial Receiver started on %s @ %s (protocol=%s)", serial_config['port'], serial_config['baudrate'], protocol)
 
     def stop(self):
-        """Stop all receiver threads."""
+        """停止所有接收线程"""
         self.running = False
         
         if self.udp_socket:
@@ -67,12 +66,12 @@ class DataReceiver(QObject):
 
     def _parse_data(self, raw_data):
         """
-        Parse comma-separated values from string.
-        Supports optional prefix ending with colon (e.g., "G:1,2,3").
-        Returns tuple (prefix, values_list) or None if parsing fails.
+        解析字符串中的逗号分隔值。
+        支持可选的冒号结尾前缀（例如 "G:1,2,3"）。
+        返回元组 (prefix, values_list)，如果解析失败则返回 None。
         """
         try:
-            # Decode if bytes
+            # 如果是字节流则进行解码
             if isinstance(raw_data, bytes):
                 text = raw_data.decode('utf-8').strip()
             else:
@@ -84,20 +83,20 @@ class DataReceiver(QObject):
             prefix = None
             csv_part = text
             
-            # Check for prefix (e.g. "G:...")
+            # 检查前缀（例如 "G:..."）
             if ':' in text:
                 parts = text.split(':', 1)
                 prefix_candidate = parts[0].strip()
-                # Treat empty string prefix as None
+                # 将空字符串前缀视为 None
                 if prefix_candidate:
                     prefix = prefix_candidate
                 else:
                     prefix = None
                 csv_part = parts[1].strip()
             else:
-                prefix = None # Explicitly set None if no colon found
+                prefix = None # 如果没有找到冒号，显式设置为 None
                 
-            # Parse CSV
+            # 解析 CSV
             if not csv_part:
                 return None
                 
@@ -108,20 +107,20 @@ class DataReceiver(QObject):
             return None
 
     def _udp_loop(self, config):
-        """Loop for receiving UDP data."""
+        """接收 UDP 数据的循环"""
         ip = config.get('ip', '127.0.0.1')
         port = config.get('port', 5005)
         
         try:
             self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.udp_socket.bind((ip, port))
-            self.udp_socket.settimeout(1.0) # 1 second timeout to allow checking self.running
+            self.udp_socket.settimeout(1.0) # 1 秒超时以允许检查 self.running
             
             while self.running:
                 try:
-                    data, addr = self.udp_socket.recvfrom(4096) # Increased buffer size
+                    data, addr = self.udp_socket.recvfrom(4096) # 增加缓冲区大小
                     
-                    # Decode and emit raw data
+                    # 解码并发出原始数据
                     try:
                         raw_text = data.decode('utf-8').strip()
                         if raw_text:
@@ -147,7 +146,7 @@ class DataReceiver(QObject):
                 self.udp_socket.close()
 
     def _serial_loop(self, config):
-        """Loop for receiving Serial data."""
+        """接收串口数据的循环"""
         port = config.get('port', 'COM3')
         baudrate = config.get('baudrate', 115200)
         timeout = config.get('timeout', 1)
@@ -162,7 +161,7 @@ class DataReceiver(QObject):
                         if self.serial_port.in_waiting > 0:
                             line = self.serial_port.readline()
                             
-                            # Decode and emit raw data
+                            # 解码并发出原始数据
                             try:
                                 raw_text = line.decode('utf-8').strip()
                                 if raw_text:
@@ -175,7 +174,7 @@ class DataReceiver(QObject):
                                 prefix, parsed = result
                                 self.data_received.emit("serial", prefix, parsed)
                         else:
-                            time.sleep(0.01) # Prevent high CPU usage
+                            time.sleep(0.01) # 防止 CPU 占用过高
                     except (serial.SerialException, OSError) as e:
                         logger.warning("Serial Read Error: %s", e)
                         break
@@ -191,7 +190,7 @@ class DataReceiver(QObject):
                     self.serial_port.close()
 
     def _serial_binary_loop(self, config):
-        """Loop for receiving ATK-MS901M binary serial data."""
+        """接收 ATK-MS901M 二进制串口数据的循环"""
         port = config.get('port', 'COM3')
         baudrate = config.get('baudrate', 115200)
         timeout = config.get('timeout', 1)
@@ -231,7 +230,7 @@ class DataReceiver(QObject):
                     except (serial.SerialException, OSError) as e:
                         logger.warning("Serial Read Error (binary): %s", e)
                         break
-
+                        
             except serial.SerialException as e:
                 logger.warning("Serial Connection Error (%s): %s", port, e)
                 time.sleep(2)

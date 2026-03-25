@@ -1,10 +1,9 @@
 """
-Inertial Navigation System math utilities.
+惯性导航系统 (INS) 数学工具。
 
-Pure functions for attitude estimation and coordinate transforms,
-independent of any UI framework.  Used by PoseProcessor.
+用于姿态估计和坐标变换的纯函数，独立于任何 UI 框架。由 PoseProcessor 使用。
 
-Quaternion convention throughout: [w, x, y, z]
+贯穿全文的四元数约定：[w, x, y, z]
 """
 
 import math
@@ -12,10 +11,9 @@ import numpy as np
 
 
 def initialize_orientation(acc, mag=None):
-    """Compute an initial orientation quaternion from accelerometer (and
-    optionally magnetometer) readings.
+    """根据加速度计（以及可选的磁力计）读数计算初始方向四元数。
 
-    Returns (quaternion, roll_deg, pitch_deg, yaw_deg).
+    返回 (quaternion, roll_deg, pitch_deg, yaw_deg)。
     """
     ax, ay, az = acc
 
@@ -52,8 +50,8 @@ def initialize_orientation(acc, mag=None):
 
 
 def rotate_vector(v, q):
-    """Rotate vector *v* by unit quaternion *q* using the rotation matrix
-    derived from *q*.  Both *v* and the return value are length-3 arrays."""
+    """使用从单位四元数 *q* 导出的旋转矩阵旋转向量 *v*。
+    *v* 和返回值都是长度为 3 的数组。"""
     w, x, y, z = q
     vx, vy, vz = v
 
@@ -65,19 +63,19 @@ def rotate_vector(v, q):
 
 
 def madgwick_update_6dof(q, gyr, acc, dt, beta=0.1):
-    """Madgwick AHRS update for 6-DOF IMU (accelerometer + gyroscope).
+    """适用于 6 自由度 IMU（加速度计 + 陀螺仪）的 Madgwick AHRS 更新。
 
-    Parameters
+    参数
     ----------
-    q : array-like [w, x, y, z]
-    gyr : array-like [gx, gy, gz] in rad/s
-    acc : array-like [ax, ay, az]
-    dt : float – time step in seconds
-    beta : float – filter gain
+    q : 数组类 [w, x, y, z]
+    gyr : 数组类 [gx, gy, gz]，单位为 rad/s
+    acc : 数组类 [ax, ay, az]
+    dt : float – 以秒为单位的时间步长
+    beta : float – 滤波器增益
 
-    Returns
+    返回
     -------
-    numpy.ndarray – updated unit quaternion [w, x, y, z]
+    numpy.ndarray – 更新后的单位四元数 [w, x, y, z]
     """
     q0, q1, q2, q3 = q
     gx, gy, gz = gyr
@@ -137,21 +135,21 @@ def madgwick_update_6dof(q, gyr, acc, dt, beta=0.1):
 
 
 def madgwick_update_9dof(q, gyr, acc, mag, dt, beta=0.1):
-    """Madgwick AHRS update for 9-DOF MARG (accelerometer + gyroscope +
-    magnetometer).  Falls back to 6-DOF when the magnetometer norm is zero.
+    """适用于 9 自由度 MARG（加速度计 + 陀螺仪 + 磁力计）的 Madgwick AHRS 更新。
+    当磁力计模为零时，回退到 6 自由度更新。
 
-    Parameters
+    参数
     ----------
-    q : array-like [w, x, y, z]
-    gyr : array-like [gx, gy, gz] in rad/s
-    acc : array-like [ax, ay, az]
-    mag : array-like [mx, my, mz]
-    dt : float – time step in seconds
-    beta : float – filter gain
+    q : 数组类 [w, x, y, z]
+    gyr : 数组类 [gx, gy, gz]，单位为 rad/s
+    acc : 数组类 [ax, ay, az]
+    mag : 数组类 [mx, my, mz]
+    dt : float – 以秒为单位的时间步长
+    beta : float – 滤波器增益
 
-    Returns
+    返回
     -------
-    numpy.ndarray – updated unit quaternion [w, x, y, z]
+    numpy.ndarray – 更新后的单位四元数 [w, x, y, z]
     """
     q0, q1, q2, q3 = q
     gx, gy, gz = gyr
