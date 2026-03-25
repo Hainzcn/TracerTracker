@@ -1,5 +1,4 @@
 import logging
-import json
 import math
 import os
 import time
@@ -10,21 +9,6 @@ import pyqtgraph.opengl as gl
 import numpy as np
 
 logger = logging.getLogger(__name__)
-
-class Config:
-    def __init__(self, config_path='config.json'):
-        self.config = {}
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                self.config = json.load(f)
-
-    def get(self, key, default=None):
-        """Get a configuration value."""
-        return self.config.get(key, default)
-    
-    def get_points_config(self):
-        """Get the points configuration list."""
-        return self.config.get('points', [])
 
 class Viewer3D(gl.GLViewWidget):
     """
