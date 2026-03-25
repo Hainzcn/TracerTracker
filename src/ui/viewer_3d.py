@@ -43,9 +43,9 @@ class Viewer3D(gl.GLViewWidget):
         
         # Initial camera settings
         self.initial_state = {
-            'distance': 60,
-            'elevation': 30,
-            'azimuth': -45,
+            'distance': 80,
+            'elevation': 45,
+            'azimuth': -135,
             'center': QVector3D(0, 0, 0)
         }
         
@@ -58,7 +58,7 @@ class Viewer3D(gl.GLViewWidget):
         self.setBackgroundColor('#121212')  # Dark high-end background
 
         # Coordinate system visual parameters (must be set before add_custom_axes)
-        self.AXIS_VISUAL_RATIO = 0.5
+        self.AXIS_VISUAL_RATIO = 0.35
         self.TICK_LABEL_POOL_SIZE = 30
         self.TICK_LINE_LENGTH_RATIO = 0.02
         
@@ -340,19 +340,23 @@ class Viewer3D(gl.GLViewWidget):
             self.tick_line_item.setVisible(False)
 
         # --- grid (XOY plane) aligned with tick interval ---
-        grid_extent = max(pos_ext * 2, 20)
+        # Snap half-extent to a multiple of interval so grid lines pass through origin
+        half_extent_raw = max(pos_ext * 2, 20)
+        half_extent = math.ceil(half_extent_raw / max(interval, 1e-15)) * interval
+        grid_extent = half_extent * 2
 
         self.grid_major.setSize(x=grid_extent, y=grid_extent)
         self.grid_major.setSpacing(x=interval, y=interval)
 
         minor_spacing = interval / 5.0
-        num_minor_lines = grid_extent / minor_spacing if minor_spacing > 1e-12 else 999
-        if num_minor_lines > 200:
-            minor_alpha = 0
-        elif num_minor_lines > 100:
-            minor_alpha = int(20 * (1.0 - (num_minor_lines - 100) / 100.0))
+        raw_interval = total_range / 6.0
+        phase = raw_interval / max(interval, 1e-15)
+        if phase <= 1.0:
+            minor_alpha = 25
+        elif phase < 1.5:
+            minor_alpha = int(25 * (1.0 - (phase - 1.0) / 0.5))
         else:
-            minor_alpha = 20
+            minor_alpha = 0
 
         self.grid_minor.setSize(x=grid_extent, y=grid_extent)
         self.grid_minor.setSpacing(x=minor_spacing, y=minor_spacing)
@@ -376,7 +380,7 @@ class Viewer3D(gl.GLViewWidget):
 
             if dist > cam_dist * 0.4:
                 new_dist = dist * 2.5
-                self.setCameraPosition(distance=new_dist, elevation=30, azimuth=45)
+                self.setCameraPosition(distance=new_dist, elevation=45, azimuth=45)
                 self.update_coordinate_system()
 
             self.first_point_rendered = True
@@ -673,7 +677,7 @@ class Viewer3D(gl.GLViewWidget):
         if max_dist < 1.0:
             target_dist = self.initial_state['distance']
         else:
-            target_dist = max_dist * 2.5
+            target_dist = max_dist * 3.5
 
         current_cam = self.cameraParams()
 
