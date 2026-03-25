@@ -2,9 +2,11 @@ import logging
 import time
 
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget, QLabel, QHBoxLayout, QSizePolicy, QTextEdit, QCheckBox, QSpinBox, QSplitter, QPushButton
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer, Qt, QEvent
 from PySide6.QtGui import QTextCursor
 from src.ui.viewer_3d import Viewer3D
+from src.ui.attitude_widget import AttitudeWidget
+from src.ui.sensor_info_overlay import SensorInfoOverlay
 from src.utils.config_loader import ConfigLoader
 from src.utils.data_receiver import DataReceiver
 from src.utils.pose_processor import PoseProcessor
@@ -47,6 +49,18 @@ class MainWindow(QMainWindow):
         self.viewer.set_render_debug_options(
             enabled=render_debug_cfg.get("enabled", False),
             verbose_point_updates=render_debug_cfg.get("verbose_point_updates", False)
+        )
+        
+        # Overlay widgets (children of viewer so they float above the 3D scene)
+        self.attitude_widget = AttitudeWidget(self.viewer)
+        self.sensor_overlay = SensorInfoOverlay(self.viewer)
+        self.pose_processor.velocity_updated.connect(self.sensor_overlay.update_velocity)
+        self.viewer.installEventFilter(self)
+        
+        # Check config to know whether quaternion data is expected
+        self._has_quaternion_point = any(
+            p.get("purpose") == "quaternion"
+            for p in self.config_loader.get("points", [])
         )
         
         # Debug Console Area (Hidden by default)
@@ -217,6 +231,7 @@ class MainWindow(QMainWindow):
         self.last_udp_time = 0
         self.last_serial_time = 0
         self.viewer.set_trail_length(self.trail_length_spinbox.value())
+        QTimer.singleShot(0, self._reposition_overlays)
         
     def toggle_debug_console(self, state):
         """Toggle the visibility of the debug console."""
@@ -297,12 +312,43 @@ class MainWindow(QMainWindow):
             self.raw_data_console.insertPlainText(log_msg + "\n")
             self.raw_data_console.moveCursor(QTextCursor.End)
 
+    def _update_overlays(self, data):
+        """Feed sensor overlay widgets from a data snapshot."""
+        if len(data) >= 19:
+            # Full ATK-MS901M snapshot: known index layout
+            if self._has_quaternion_point:
+                self.attitude_widget.update_quaternion(
+                    data[6], data[7], data[8], data[9]
+                )
+            else:
+                self.attitude_widget.update_euler(
+                    data[14], data[15], data[16]
+                )
+            self.sensor_overlay.update_acceleration(data[0], data[1], data[2])
+            self.sensor_overlay.update_altitude(
+                pressure=data[17], altitude=data[18]
+            )
+
+    def _reposition_overlays(self):
+        """Place overlay widgets at corners of the viewer."""
+        vw = self.viewer.width()
+        vh = self.viewer.height()
+        margin = 10
+        aw = self.attitude_widget
+        aw.move(vw - aw.width() - margin, margin)
+        so = self.sensor_overlay
+        so.adjustSize()
+        so.move(vw - so.width() - margin, vh - so.height() - margin)
+
     def on_data_received(self, source, prefix, data):
         """Handle received data from UDP or Serial."""
         current_time = time.time()
         
         # Process data for pose estimation first
         self.pose_processor.process(source, prefix, data)
+        
+        # Feed overlay widgets
+        self._update_overlays(data)
         
         # Update status indicators
         status_text = f"Receiving ({len(data)} values)"
@@ -383,6 +429,15 @@ class MainWindow(QMainWindow):
         if current_time - self.last_serial_time > timeout:
             self.serial_status_label.setText("Serial: Idle")
             self.serial_status_label.setStyleSheet("color: #888;") # Grey
+
+    def eventFilter(self, obj, event):
+        if obj is self.viewer and event.type() == QEvent.Resize:
+            self._reposition_overlays()
+        return super().eventFilter(obj, event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._reposition_overlays()
 
     def closeEvent(self, event):
         """Clean up resources on close."""

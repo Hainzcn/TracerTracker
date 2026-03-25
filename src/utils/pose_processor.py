@@ -11,6 +11,8 @@ class PoseProcessor(QObject):
     # Signal for linear acceleration (gravity stripped): (source, prefix, linear_acc, gyr, mag)
     # Using 'object' for gyr and mag to allow None values, as 'list' type enforces strict list type
     parsed_data_updated = Signal(str, str, list, object, object)
+    # Velocity vector after integration: (vx, vy, vz)
+    velocity_updated = Signal(float, float, float)
 
     def __init__(self, config_loader):
         super().__init__()
@@ -238,8 +240,11 @@ class PoseProcessor(QObject):
             debug_msg.append(f"Pos: [{self.position[0]:.2f}, {self.position[1]:.2f}, {self.position[2]:.2f}]")
             self.log_message.emit(" | ".join(debug_msg))
         
-        # Emit the new position
-        # We name this point "Displacement Path"
+        self.velocity_updated.emit(
+            float(self.velocity[0]),
+            float(self.velocity[1]),
+            float(self.velocity[2]),
+        )
         self.position_updated.emit("Displacement Path", self.position[0], self.position[1], self.position[2])
 
     def _extract_vector(self, config, data):

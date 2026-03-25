@@ -44,19 +44,15 @@ def split_raw_data(raw_hex_str):
     frames = []
     frame_start = -1
     
-    # 遍历找帧头0x55 0x55
     for i in range(len(hex_vals)-1):
         if hex_vals[i] == 0x55 and hex_vals[i+1] == 0x55:
             if frame_start != -1:
-                # 截取上一帧（从帧头到当前帧头前）
                 frames.append(hex_vals[frame_start:i])
-            frame_start = i  # 标记新帧开始
+            frame_start = i
     
-    # 处理最后一帧
     if frame_start != -1:
         frames.append(hex_vals[frame_start:])
     
-    # 过滤无效帧
     valid_frames = [f for f in frames if len(f) >= 7]
     return valid_frames
 
@@ -70,7 +66,6 @@ def parse_attitude_frame(frame_data):
     if len(frame_data) != 6:
         raise ValueError(f"姿态角帧数据段长度错误，需6字节，实际{len(frame_data)}字节")
     
-    # 低字节在前，组合为int16后换算为角度
     roll = hex_to_int16(frame_data[0], frame_data[1]) / 32768 * 180
     pitch = hex_to_int16(frame_data[2], frame_data[3]) / 32768 * 180
     yaw = hex_to_int16(frame_data[4], frame_data[5]) / 32768 * 180
@@ -115,12 +110,10 @@ def parse_gyro_acc_frame(frame_data, acc_fsr=4, gyro_fsr=2000):
     if len(frame_data) != 12:
         raise ValueError(f"陀螺仪+加速度帧数据段长度错误，需12字节，实际{len(frame_data)}字节")
     
-    # 加速度计解析
     ax = hex_to_int16(frame_data[0], frame_data[1]) / 32768 * acc_fsr * 9.8
     ay = hex_to_int16(frame_data[2], frame_data[3]) / 32768 * acc_fsr * 9.8
     az = hex_to_int16(frame_data[4], frame_data[5]) / 32768 * acc_fsr * 9.8
     
-    # 陀螺仪解析
     gx = hex_to_int16(frame_data[6], frame_data[7]) / 32768 * gyro_fsr
     gy = hex_to_int16(frame_data[8], frame_data[9]) / 32768 * gyro_fsr
     gz = hex_to_int16(frame_data[10], frame_data[11]) / 32768 * gyro_fsr
@@ -148,12 +141,10 @@ def parse_mag_temp_frame(frame_data):
     if len(frame_data) != 8:
         raise ValueError(f"磁力计+温度帧数据段长度错误，需8字节，实际{len(frame_data)}字节")
     
-    # 磁力计解析
     mx = hex_to_int16(frame_data[0], frame_data[1])
     my = hex_to_int16(frame_data[2], frame_data[3])
     mz = hex_to_int16(frame_data[4], frame_data[5])
     
-    # 温度解析
     temp = hex_to_int16(frame_data[6], frame_data[7]) / 100
     
     return {
@@ -175,14 +166,11 @@ def parse_baro_alt_temp_frame(frame_data):
     if len(frame_data) != 10:
         raise ValueError(f"气压计+海拔+温度帧数据段长度错误，需10字节，实际{len(frame_data)}字节")
     
-    # 气压解析
     pressure = hex_to_int32(frame_data[0], frame_data[1], frame_data[2], frame_data[3])
     
-    # 海拔解析
     altitude_cm = hex_to_int32(frame_data[4], frame_data[5], frame_data[6], frame_data[7])
     altitude_m = altitude_cm / 100
     
-    # 温度解析
     temp = hex_to_int16(frame_data[8], frame_data[9]) / 100
     
     return {
@@ -202,28 +190,23 @@ def parse_ext_port_frame(frame_data, port_mode="analog"):
     if len(frame_data) != 8:
         raise ValueError(f"扩展端口帧数据段长度错误，需8字节，实际{len(frame_data)}字节")
     
-    # 解析D0/D1/D2/D3（无符号16位，低字节在前）
     d0 = hex_to_uint16(frame_data[0], frame_data[1])
     d1 = hex_to_uint16(frame_data[2], frame_data[3])
     d2 = hex_to_uint16(frame_data[4], frame_data[5])
     d3 = hex_to_uint16(frame_data[6], frame_data[7])
     
-    # 按端口模式换算
     port_data = {"帧类型": "扩展端口", "端口模式": port_mode}
     if port_mode == "analog":
-        # 模拟输入
         port_data["D0(V)"] = round(d0 / 4095 * 3.3, 4)
         port_data["D1(V)"] = round(d1 / 4095 * 3.3, 4)
         port_data["D2(V)"] = round(d2 / 4095 * 3.3, 4)
         port_data["D3(V)"] = round(d3 / 4095 * 3.3, 4)
     elif port_mode == "digital":
-        # 数字输入/输出
         port_data["D0(电平)"] = 1 if d0 > 0 else 0
         port_data["D1(电平)"] = 1 if d1 > 0 else 0
         port_data["D2(电平)"] = 1 if d2 > 0 else 0
         port_data["D3(电平)"] = 1 if d3 > 0 else 0
     elif port_mode == "pwm":
-        # PWM输出
         port_data["D0(μs)"] = d0
         port_data["D1(μs)"] = d1
         port_data["D2(μs)"] = d2
@@ -240,14 +223,11 @@ def parse_ms901m_raw_data(raw_hex_str, ext_port_mode="analog"):
     :param ext_port_mode: 扩展端口模式（默认模拟输入）
     :return: 解析结果列表（每一项为一个帧的解析结果，含校验状态）
     """
-    # 1. 拆分帧并初始化结果
     frames = split_raw_data(raw_hex_str)
     parse_results = []
     
-    # 2. 逐帧解析
     for idx, frame in enumerate(frames):
         try:
-            # 帧结构
             frame_head1 = frame[0]
             frame_head2 = frame[1]
             frame_id = frame[2]
@@ -255,7 +235,6 @@ def parse_ms901m_raw_data(raw_hex_str, ext_port_mode="analog"):
             checksum = frame[-1]
             data_segment = frame[4:-1]
             
-            # 基础校验
             if frame_head1 != 0x55 or frame_head2 != 0x55:
                 parse_results.append({"帧序号": idx+1, "状态": "无效", "原因": "帧头错误"})
                 continue
@@ -263,7 +242,6 @@ def parse_ms901m_raw_data(raw_hex_str, ext_port_mode="analog"):
                 parse_results.append({"帧序号": idx+1, "状态": "无效", "原因": f"数据段长度不匹配，需{data_len}字节，实际{len(data_segment)}字节"})
                 continue
             
-            # 校验和验证
             checksum_calc = calculate_checksum(frame[:-1])
             if checksum_calc != checksum:
                 parse_results.append({
@@ -271,10 +249,8 @@ def parse_ms901m_raw_data(raw_hex_str, ext_port_mode="analog"):
                 })
                 continue
             
-            # 转换数据段为字符串列表
             data_segment_hex = [hex(val)[2:].zfill(2).upper() for val in data_segment]
             
-            # 按ID解析对应帧
             if frame_id == 0x01:
                 result = parse_attitude_frame(data_segment_hex)
             elif frame_id == 0x02:
@@ -290,7 +266,6 @@ def parse_ms901m_raw_data(raw_hex_str, ext_port_mode="analog"):
             else:
                 result = {"帧类型": "未知帧", "ID": hex(frame_id)}
             
-            # 补充帧序号和状态
             result["帧序号"] = idx+1
             result["状态"] = "有效"
             parse_results.append(result)
@@ -331,8 +306,6 @@ class MS901MStreamParser:
         self._buffer = bytearray()
         self._latest = {}
 
-    # -- low-level byte conversions ----------------------------------------
-
     @staticmethod
     def _to_int16(low, high):
         val = (high << 8) | low
@@ -350,8 +323,6 @@ class MS901MStreamParser:
         if val > 2147483647:
             val -= 4294967296
         return val
-
-    # -- public API ---------------------------------------------------------
 
     def feed(self, data):
         """
@@ -396,8 +367,6 @@ class MS901MStreamParser:
             f"P={snapshot[17]:.0f}Pa Alt={snapshot[18]:.2f}m"
         )
 
-    # -- frame extraction ---------------------------------------------------
-
     def _try_extract_frame(self):
         """
         Scan the buffer for the next complete, checksum-valid frame.
@@ -436,8 +405,6 @@ class MS901MStreamParser:
 
             self._buffer = self._buffer[total_len:]
             return (frame_id, bytes(frame_bytes[4:4 + data_len]))
-
-    # -- per-frame parsers --------------------------------------------------
 
     def _parse_frame(self, frame_id, d):
         try:
@@ -501,8 +468,6 @@ class MS901MStreamParser:
         altitude = self._to_int32(d[4], d[5], d[6], d[7]) / 100.0
         temp     = self._to_int16(d[8], d[9]) / 100.0
         return {"pressure": pressure, "altitude": altitude, "temp": temp}
-
-    # -- snapshot builder ---------------------------------------------------
 
     def _build_snapshot(self):
         """

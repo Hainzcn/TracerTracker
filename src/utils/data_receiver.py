@@ -4,7 +4,7 @@ import threading
 import time
 import serial
 from PySide6.QtCore import QObject, Signal
-from ATKMS901M_resolver import MS901MStreamParser
+from src.utils.atkms901m_resolver import MS901MStreamParser
 
 logger = logging.getLogger(__name__)
 
