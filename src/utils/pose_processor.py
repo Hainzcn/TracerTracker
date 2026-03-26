@@ -1,12 +1,17 @@
+import math
+import time
+
 import numpy as np
 from PySide6.QtCore import QObject, Signal
-import time
 
 from src.utils.ins_math import (
     initialize_orientation,
     rotate_vector,
     madgwick_update_6dof,
     madgwick_update_9dof,
+    LowPassFilter,
+    VerticalKalmanFilter,
+    ZUPTDetector,
 )
 
 
@@ -26,15 +31,34 @@ class PoseProcessor(QObject):
     def reset(self):
         self.velocity = np.zeros(3)
         self.position = np.zeros(3)
-        self.last_time = time.time()
+        self.last_time = time.perf_counter()
         self.initialized = False
 
-        # 四元数 [w, x, y, z]: 传感器 -> 地球
         self.q = np.array([1.0, 0.0, 0.0, 0.0])
-
         self.beta = 0.1
-
         self.gravity = self.config_loader.get("gravity_reference", 9.81)
+
+        ins_cfg = self.config_loader.get_ins_config()
+
+        kf_cfg = ins_cfg["kalman"]
+        self.kf_enabled = kf_cfg.get("enabled", True)
+        self.vkf = VerticalKalmanFilter(
+            R=kf_cfg.get("measurement_noise_R", 0.5),
+            sigma_a=kf_cfg.get("process_noise_sigma", 0.5),
+        )
+
+        zupt_cfg = ins_cfg["zupt"]
+        self.zupt_enabled = zupt_cfg.get("enabled", True)
+        self.zupt = ZUPTDetector(
+            acc_threshold=zupt_cfg.get("acc_variance_threshold", 0.1),
+            gyro_threshold=zupt_cfg.get("gyro_variance_threshold", 0.01),
+            window_size=zupt_cfg.get("window_size", 20),
+        )
+
+        self.baro_lpf = LowPassFilter(
+            alpha=ins_cfg.get("baro_lpf_alpha", 0.05),
+        )
+        self._baro_ref = None
 
     # ------------------------------------------------------------------
     # 主入口点
@@ -48,6 +72,7 @@ class PoseProcessor(QObject):
         gyr_vec = None
         mag_vec = None
         quat_vec = None
+        baro_alt = None
 
         matched_points = 0
         for p in points_config:
@@ -71,6 +96,8 @@ class PoseProcessor(QObject):
                 mag_vec = self._extract_vector(p, data)
             elif purpose == "quaternion":
                 quat_vec = self._extract_quaternion(p, data)
+            elif purpose == "barometer":
+                baro_alt = self._extract_barometer(p, data)
 
         if acc_vec is None:
             if self.frame_count == 0:
@@ -91,7 +118,7 @@ class PoseProcessor(QObject):
                     )
             return
 
-        current_time = time.time()
+        current_time = time.perf_counter()
         dt = current_time - self.last_time
         self.last_time = current_time
         self.frame_count += 1
@@ -174,8 +201,50 @@ class PoseProcessor(QObject):
             mag_vec.tolist() if mag_vec is not None else None,
         )
 
-        self.velocity += linear_acc * dt
-        self.position += self.velocity * dt
+        # ---- ZUPT 零速检测 ----
+        is_stationary = False
+        if self.zupt_enabled and gyr_vec is not None:
+            acc_norm_sq = float(acc_vec[0] ** 2 + acc_vec[1] ** 2 + acc_vec[2] ** 2)
+            gyro_norm = float(math.sqrt(
+                gyr_vec[0] ** 2 + gyr_vec[1] ** 2 + gyr_vec[2] ** 2
+            ))
+            is_stationary = self.zupt.update(acc_norm_sq, gyro_norm)
+
+        # ---- 垂直通道：卡尔曼滤波 ----
+        if self.kf_enabled:
+            a_z = float(linear_acc[2])
+            self.vkf.predict(dt, a_z)
+
+            if baro_alt is not None:
+                baro_filtered = self.baro_lpf.update(baro_alt)
+                if self._baro_ref is None:
+                    self._baro_ref = baro_filtered
+                delta_h = baro_filtered - self._baro_ref
+                self.vkf.update(delta_h)
+
+            if is_stationary:
+                self.vkf.apply_zupt()
+
+            self.position[2] = self.vkf.x[0]
+            self.velocity[2] = self.vkf.x[1]
+        else:
+            self.velocity[2] += linear_acc[2] * dt
+            self.position[2] += self.velocity[2] * dt
+
+        # ---- 水平通道：积分 + ZUPT ----
+        self.velocity[0] += linear_acc[0] * dt
+        self.velocity[1] += linear_acc[1] * dt
+
+        if is_stationary:
+            self.velocity[0] = 0.0
+            self.velocity[1] = 0.0
+            if not self.kf_enabled:
+                self.velocity[2] = 0.0
+            if should_log:
+                debug_msg.append("ZUPT: stationary detected, velocity zeroed")
+
+        self.position[0] += self.velocity[0] * dt
+        self.position[1] += self.velocity[1] * dt
 
         if should_log:
             debug_msg.append(
@@ -190,6 +259,11 @@ class PoseProcessor(QObject):
                 f"Pos: [{self.position[0]:.2f}, {self.position[1]:.2f}, "
                 f"{self.position[2]:.2f}]"
             )
+            if self.kf_enabled:
+                debug_msg.append(
+                    f"KF h={self.vkf.x[0]:.3f} v={self.vkf.x[1]:.3f} "
+                    f"a={self.vkf.x[2]:.3f}"
+                )
             self.log_message.emit(" | ".join(debug_msg))
 
         self.velocity_updated.emit(
@@ -268,5 +342,21 @@ class PoseProcessor(QObject):
         except (IndexError, ValueError, TypeError, KeyError) as e:
             self.log_message.emit(
                 f"Error extracting quaternion for {config.get('name')}: {e}"
+            )
+        return None
+
+    def _extract_barometer(self, config, data):
+        """从数据中提取气压计高度值 (m)。"""
+        try:
+            alt_cfg = config.get("altitude", {})
+            alt_idx = alt_cfg.get("index", 0)
+            alt_mult = alt_cfg.get("multiplier", 1.0)
+            if len(data) > alt_idx:
+                val = float(data[alt_idx]) * alt_mult
+                if val != 0.0:
+                    return val
+        except (IndexError, ValueError, TypeError, KeyError) as e:
+            self.log_message.emit(
+                f"Error extracting barometer for {config.get('name')}: {e}"
             )
         return None

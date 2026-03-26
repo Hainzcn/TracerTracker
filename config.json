@@ -11,12 +11,26 @@
         "baudrate": 115200,
         "timeout": 1,
         "protocol": "atkms901m",
-        "acc_fsr": 4,
+        "acc_fsr": 2,
         "gyro_fsr": 2000
     },
     "render_debug": {
         "enabled": true,
         "verbose_point_updates": false
+    },
+    "ins": {
+        "kalman": {
+            "enabled": true,
+            "process_noise_sigma": 0.5,
+            "measurement_noise_R": 0.5
+        },
+        "zupt": {
+            "enabled": true,
+            "acc_variance_threshold": 0.1,
+            "gyro_variance_threshold": 0.01,
+            "window_size": 20
+        },
+        "baro_lpf_alpha": 0.05
     },
     "points": [
         {
@@ -51,6 +65,13 @@
             "x": { "index": 10, "multiplier": 1.0 },
             "y": { "index": 11, "multiplier": 1.0 },
             "z": { "index": 12, "multiplier": 1.0 }
+        },
+        {
+            "name": "BARO",
+            "source": "serial",
+            "purpose": "barometer",
+            "altitude": { "index": 18, "multiplier": 1.0 },
+            "pressure": { "index": 17, "multiplier": 1.0 }
         },
         {
             "name": "Point G (Prefixed)",

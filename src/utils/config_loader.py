@@ -8,6 +8,21 @@ class ConfigLoader:
     _instance = None
     _config = {}
     
+    DEFAULT_INS_CONFIG = {
+        "kalman": {
+            "enabled": True,
+            "process_noise_sigma": 0.5,
+            "measurement_noise_R": 0.5,
+        },
+        "zupt": {
+            "enabled": True,
+            "acc_variance_threshold": 0.1,
+            "gyro_variance_threshold": 0.01,
+            "window_size": 20,
+        },
+        "baro_lpf_alpha": 0.05,
+    }
+
     DEFAULT_CONFIG = {
         "gravity_reference": 10.00,
         "udp": {
@@ -26,6 +41,7 @@ class ConfigLoader:
             "enabled": False,
             "verbose_point_updates": False
         },
+        "ins": DEFAULT_INS_CONFIG,
         "points": [
             {
                 "name": "ACC",
@@ -102,3 +118,22 @@ class ConfigLoader:
 
     def get_render_debug_config(self):
         return self._config.get('render_debug', self.DEFAULT_CONFIG['render_debug'])
+
+    def get_ins_config(self):
+        """获取惯性导航系统配置，缺失字段回退到默认值。"""
+        cfg = self._config.get('ins', {})
+        default = self.DEFAULT_INS_CONFIG
+
+        kalman_default = default["kalman"]
+        kalman = cfg.get("kalman", {})
+        merged_kalman = {k: kalman.get(k, v) for k, v in kalman_default.items()}
+
+        zupt_default = default["zupt"]
+        zupt = cfg.get("zupt", {})
+        merged_zupt = {k: zupt.get(k, v) for k, v in zupt_default.items()}
+
+        return {
+            "kalman": merged_kalman,
+            "zupt": merged_zupt,
+            "baro_lpf_alpha": cfg.get("baro_lpf_alpha", default["baro_lpf_alpha"]),
+        }

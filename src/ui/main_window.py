@@ -295,7 +295,12 @@ class MainWindow(QMainWindow):
             self.raw_data_console.moveCursor(QTextCursor.End)
 
     def on_parsed_data_updated(self, source, prefix, linear_acc, gyr, mag):
-        """处理解析后的数据更新，用于解析视图日志。"""
+        """处理解析后的数据更新，用于叠加层和解析视图日志。"""
+        if linear_acc is not None:
+            self.sensor_overlay.update_acceleration(
+                linear_acc[0], linear_acc[1], linear_acc[2]
+            )
+
         if self.debug_splitter.isVisible() and self.show_parsed_data:
             timestamp = time.strftime("%H:%M:%S", time.localtime(time.time()))
             parsed_str = self.format_parsed_data(prefix, linear_acc, gyr, mag)
@@ -317,7 +322,6 @@ class MainWindow(QMainWindow):
                 self.attitude_widget.update_euler(
                     data[14], data[15], data[16]
                 )
-            self.sensor_overlay.update_acceleration(data[0], data[1], data[2])
             self.sensor_overlay.update_altitude(
                 pressure=data[17], altitude=data[18]
             )
