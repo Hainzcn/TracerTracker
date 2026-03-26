@@ -7,11 +7,11 @@
     },
     "serial": {
         "enabled": true,
-        "port": "COM8",
+        "port": "COM5",
         "baudrate": 115200,
         "timeout": 1,
         "protocol": "atkms901m",
-        "acc_fsr": 2,
+        "acc_fsr": 4,
         "gyro_fsr": 2000
     },
     "render_debug": {
@@ -26,11 +26,11 @@
         },
         "zupt": {
             "enabled": true,
-            "acc_variance_threshold": 0.1,
-            "gyro_variance_threshold": 0.01,
-            "window_size": 20
+            "acc_variance_threshold": 0.5,
+            "gyro_variance_threshold": 0.1,
+            "window_size": 40
         },
-        "baro_lpf_alpha": 0.05
+        "baro_lpf_alpha": 0.1
     },
     "points": [
         {
