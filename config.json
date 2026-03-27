@@ -30,7 +30,15 @@
             "gyro_variance_threshold": 0.1,
             "window_size": 40
         },
-        "baro_lpf_alpha": 0.1
+        "baro_lpf_alpha": 0.1,
+        "madgwick": {
+            "beta": 0.05
+        },
+        "mahony": {
+            "kp": 1.0,
+            "ki": 0.0
+        },
+        "filter_yaw_offset_deg": 90.0
     },
     "points": [
         {

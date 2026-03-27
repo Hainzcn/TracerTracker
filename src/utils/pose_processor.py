@@ -7,8 +7,11 @@ from PySide6.QtCore import QObject, Signal
 from src.utils.ins_math import (
     initialize_orientation,
     rotate_vector,
+    quat_multiply,
     madgwick_update_6dof,
     madgwick_update_9dof,
+    mahony_update_6dof,
+    mahony_update_9dof,
     LowPassFilter,
     VerticalKalmanFilter,
     ZUPTDetector,
@@ -21,6 +24,8 @@ class PoseProcessor(QObject):
     # (source, prefix, linear_acc, gyr, mag)  –  gyr/mag may be None
     parsed_data_updated = Signal(str, str, list, object, object)
     velocity_updated = Signal(float, float, float)
+    # (madgwick_q: list[4], mahony_q: list[4])
+    filter_quaternions_updated = Signal(list, list)
 
     def __init__(self, config_loader):
         super().__init__()
@@ -35,10 +40,25 @@ class PoseProcessor(QObject):
         self.initialized = False
 
         self.q = np.array([1.0, 0.0, 0.0, 0.0])
-        self.beta = 0.1
+        self.q_madgwick = np.array([1.0, 0.0, 0.0, 0.0])
+        self.q_mahony = np.array([1.0, 0.0, 0.0, 0.0])
+        self.mahony_integral_fb = np.zeros(3)
         self.gravity = self.config_loader.get("gravity_reference", 9.81)
 
         ins_cfg = self.config_loader.get_ins_config()
+
+        madgwick_cfg = ins_cfg["madgwick"]
+        self.beta = madgwick_cfg.get("beta", 0.1)
+
+        mahony_cfg = ins_cfg["mahony"]
+        self.mahony_kp = mahony_cfg.get("kp", 1.0)
+        self.mahony_ki = mahony_cfg.get("ki", 0.0)
+
+        yaw_offset = ins_cfg.get("filter_yaw_offset_deg", 90.0)
+        half_yaw = math.radians(yaw_offset) / 2.0
+        self._q_yaw_corr = np.array([
+            math.cos(half_yaw), 0.0, 0.0, math.sin(half_yaw)
+        ])
 
         kf_cfg = ins_cfg["kalman"]
         self.kf_enabled = kf_cfg.get("enabled", True)
@@ -139,6 +159,9 @@ class PoseProcessor(QObject):
         if has_gravity and not self.initialized and quat_vec is None:
             q, roll, pitch, yaw = initialize_orientation(acc_vec, mag_vec)
             self.q = q
+            self.q_madgwick = q.copy()
+            self.q_mahony = q.copy()
+            self.mahony_integral_fb[:] = 0.0
             self.initialized = True
             self.log_message.emit(
                 f"Initialized Orientation: Roll={roll:.1f}, "
@@ -179,6 +202,27 @@ class PoseProcessor(QObject):
                     )
                     if should_log:
                         debug_msg.append("Updated Q (6DOF)")
+
+            # 独立运行 Madgwick / Mahony 滤波器用于姿态对比展示
+            if gyr_vec is not None:
+                if mag_vec is not None:
+                    self.q_madgwick = madgwick_update_9dof(
+                        self.q_madgwick, gyr_vec, acc_vec, mag_vec, dt, self.beta
+                    )
+                    self.q_mahony = mahony_update_9dof(
+                        self.q_mahony, gyr_vec, acc_vec, mag_vec, dt,
+                        kp=self.mahony_kp, ki=self.mahony_ki,
+                        integral_fb=self.mahony_integral_fb,
+                    )
+                else:
+                    self.q_madgwick = madgwick_update_6dof(
+                        self.q_madgwick, gyr_vec, acc_vec, dt, self.beta
+                    )
+                    self.q_mahony = mahony_update_6dof(
+                        self.q_mahony, gyr_vec, acc_vec, dt,
+                        kp=self.mahony_kp, ki=self.mahony_ki,
+                        integral_fb=self.mahony_integral_fb,
+                    )
 
             acc_earth = rotate_vector(acc_vec, self.q)
             linear_acc = acc_earth - np.array([0.0, 0.0, self.gravity])
@@ -276,6 +320,10 @@ class PoseProcessor(QObject):
             self.position[0],
             self.position[1],
             self.position[2],
+        )
+        self.filter_quaternions_updated.emit(
+            quat_multiply(self._q_yaw_corr, self.q_madgwick).tolist(),
+            quat_multiply(self._q_yaw_corr, self.q_mahony).tolist(),
         )
 
     # ------------------------------------------------------------------

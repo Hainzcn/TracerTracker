@@ -6,63 +6,129 @@ from PySide6.QtGui import QColor
 import pyqtgraph.opengl as gl
 
 
+def _quat_to_euler(w, x, y, z):
+    """四元数 [w,x,y,z] -> (roll, pitch, yaw) 度，ZYX 顺序。"""
+    sinr_cosp = 2.0 * (w * x + y * z)
+    cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+
+    sinp = 2.0 * (w * y - z * x)
+    sinp = max(-1.0, min(1.0, sinp))
+    pitch = math.asin(sinp)
+
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+
+    return math.degrees(roll), math.degrees(pitch), math.degrees(yaw)
+
+
 class AttitudeWidget(QWidget):
     """
-    显示 3D 姿态立方体和方向文本的叠加部件。
-    旨在放置在主 3D 视图的右上角。
-    默认隐藏；一旦接收到姿态数据即变为可见。
+    显示 3 个 3D 姿态立方体和姿态角文本的叠加部件。
+    第一个为原生四元数，第二个为 Madgwick，第三个为 Mahony。
     """
+
+    _CUBE_SIZE = 120
+    _WIDGET_WIDTH = 150
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(180, 230)
-        self.setStyleSheet(
-            "AttitudeWidget { background: rgba(18, 18, 18, 210); border-radius: 6px; }"
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        self._title_style = (
+            "QLabel {"
+            "  color: #999999;"
+            "  background: transparent;"
+            "  font-family: Consolas, monospace;"
+            "  font-size: 9px;"
+            "  padding: 0px;"
+            "  margin: 0px;"
+            "}"
+        )
+        self._angle_style = (
+            "QLabel {"
+            "  color: #cccccc;"
+            "  background: transparent;"
+            "  font-family: Consolas, monospace;"
+            "  font-size: 9px;"
+            "  padding: 0px;"
+            "  margin: 0px;"
+            "}"
         )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(4)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(0)
 
-        self.cube_view = _CubeGLWidget()
-        self.cube_view.setFixedSize(170, 170)
-        layout.addWidget(self.cube_view, alignment=Qt.AlignCenter)
+        self.cube_raw, self.label_raw = self._add_cube_group(layout, "Raw")
+        self.cube_madgwick, self.label_madgwick = self._add_cube_group(layout, "Madgwick")
+        self.cube_mahony, self.label_mahony = self._add_cube_group(layout, "Mahony")
 
-        self.label = QLabel("--")
-        self.label.setAlignment(Qt.AlignCenter)
-        self.label.setWordWrap(True)
-        self.label.setStyleSheet(
-            "QLabel {"
-            "  color: #e0e0e0;"
-            "  background-color: rgba(30, 30, 30, 220);"
-            "  border-radius: 4px;"
-            "  padding: 4px 8px;"
-            "  font-family: Consolas, monospace;"
-            "  font-size: 11px;"
-            "}"
+        group_h = 12 + self._CUBE_SIZE + 14
+        total_h = 2 + 3 * group_h + 2
+        self.setFixedSize(self._WIDGET_WIDTH, total_h)
+        self.setStyleSheet(
+            "AttitudeWidget { background: rgba(18, 18, 18, 180); border-radius: 6px; }"
         )
-        layout.addWidget(self.label)
 
         self._has_data = False
         self.setVisible(False)
 
-    def update_quaternion(self, q0, q1, q2, q3):
-        """根据四元数旋转立方体并显示四元数值。"""
+    def _add_cube_group(self, parent_layout, title_text):
+        title = QLabel(title_text)
+        title.setAlignment(Qt.AlignCenter)
+        title.setFixedHeight(12)
+        title.setStyleSheet(self._title_style)
+        parent_layout.addWidget(title)
+
+        cube = _CubeGLWidget()
+        cube.setFixedSize(self._CUBE_SIZE, self._CUBE_SIZE)
+        parent_layout.addWidget(cube, alignment=Qt.AlignCenter)
+
+        label = QLabel("R:  --    P:  --    Y:  --")
+        label.setAlignment(Qt.AlignCenter)
+        label.setFixedHeight(14)
+        label.setStyleSheet(self._angle_style)
+        parent_layout.addWidget(label)
+
+        return cube, label
+
+    @staticmethod
+    def _euler_text(roll, pitch, yaw):
+        return f"R:{roll:+6.1f}\u00b0 P:{pitch:+6.1f}\u00b0 Y:{yaw:+6.1f}\u00b0"
+
+    def _ensure_visible(self):
         if not self._has_data:
             self._has_data = True
             self.setVisible(True)
-        self.cube_view.set_rotation_quaternion(q0, q1, q2, q3)
-        self.label.setText(
-            f"Q: {q0:.3f}, {q1:.3f}\n   {q2:.3f}, {q3:.3f}"
-        )
+
+    def update_quaternion(self, q0, q1, q2, q3):
+        """原生四元数 -- 旋转第一个立方体，显示姿态角。"""
+        self._ensure_visible()
+        self.cube_raw.set_rotation_quaternion(q0, q1, q2, q3)
+        r, p, y = _quat_to_euler(q0, q1, q2, q3)
+        self.label_raw.setText(self._euler_text(r, p, y))
 
     def update_euler(self, roll, pitch, yaw):
-        """根据欧拉角（度）旋转立方体并显示数值。"""
-        if not self._has_data:
-            self._has_data = True
-            self.setVisible(True)
-        self.cube_view.set_rotation_euler(roll, pitch, yaw)
-        self.label.setText(f"R:{roll:+7.1f}\u00b0  P:{pitch:+7.1f}\u00b0\nY:{yaw:+7.1f}\u00b0")
+        """原生欧拉角 -- 旋转第一个立方体，显示姿态角。"""
+        self._ensure_visible()
+        self.cube_raw.set_rotation_euler(roll, pitch, yaw)
+        self.label_raw.setText(self._euler_text(roll, pitch, yaw))
+
+    def update_madgwick_quaternion(self, q0, q1, q2, q3):
+        """Madgwick 滤波器四元数 -- 旋转第二个立方体，显示姿态角。"""
+        self._ensure_visible()
+        self.cube_madgwick.set_rotation_quaternion(q0, q1, q2, q3)
+        r, p, y = _quat_to_euler(q0, q1, q2, q3)
+        self.label_madgwick.setText(self._euler_text(r, p, y))
+
+    def update_mahony_quaternion(self, q0, q1, q2, q3):
+        """Mahony 滤波器四元数 -- 旋转第三个立方体，显示姿态角。"""
+        self._ensure_visible()
+        self.cube_mahony.set_rotation_quaternion(q0, q1, q2, q3)
+        r, p, y = _quat_to_euler(q0, q1, q2, q3)
+        self.label_mahony.setText(self._euler_text(r, p, y))
 
     # 让鼠标事件穿透到下方的 3D 视图
     def mousePressEvent(self, ev):

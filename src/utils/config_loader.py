@@ -21,6 +21,14 @@ class ConfigLoader:
             "window_size": 20,
         },
         "baro_lpf_alpha": 0.05,
+        "madgwick": {
+            "beta": 0.1,
+        },
+        "mahony": {
+            "kp": 1.0,
+            "ki": 0.0,
+        },
+        "filter_yaw_offset_deg": 90.0,
     }
 
     DEFAULT_CONFIG = {
@@ -132,8 +140,19 @@ class ConfigLoader:
         zupt = cfg.get("zupt", {})
         merged_zupt = {k: zupt.get(k, v) for k, v in zupt_default.items()}
 
+        madgwick_default = default["madgwick"]
+        madgwick = cfg.get("madgwick", {})
+        merged_madgwick = {k: madgwick.get(k, v) for k, v in madgwick_default.items()}
+
+        mahony_default = default["mahony"]
+        mahony = cfg.get("mahony", {})
+        merged_mahony = {k: mahony.get(k, v) for k, v in mahony_default.items()}
+
         return {
             "kalman": merged_kalman,
             "zupt": merged_zupt,
             "baro_lpf_alpha": cfg.get("baro_lpf_alpha", default["baro_lpf_alpha"]),
+            "madgwick": merged_madgwick,
+            "mahony": merged_mahony,
+            "filter_yaw_offset_deg": cfg.get("filter_yaw_offset_deg", default["filter_yaw_offset_deg"]),
         }

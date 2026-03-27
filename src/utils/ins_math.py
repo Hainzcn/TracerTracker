@@ -51,6 +51,16 @@ def initialize_orientation(acc, mag=None):
     return q, math.degrees(roll), math.degrees(pitch), math.degrees(yaw)
 
 
+def quat_multiply(p, q):
+    """Hamilton 积 p * q，两者均为 [w, x, y, z] 格式。"""
+    return np.array([
+        p[0]*q[0] - p[1]*q[1] - p[2]*q[2] - p[3]*q[3],
+        p[0]*q[1] + p[1]*q[0] + p[2]*q[3] - p[3]*q[2],
+        p[0]*q[2] - p[1]*q[3] + p[2]*q[0] + p[3]*q[1],
+        p[0]*q[3] + p[1]*q[2] - p[2]*q[1] + p[3]*q[0],
+    ])
+
+
 def rotate_vector(v, q):
     """使用从单位四元数 *q* 导出的旋转矩阵旋转向量 *v*。
     *v* 和返回值都是长度为 3 的数组。"""
@@ -228,6 +238,181 @@ def madgwick_update_9dof(q, gyr, acc, mag, dt, beta=0.1):
     q3 += qDot3 * dt
 
     norm = math.sqrt(q0*q0 + q1*q1 + q2*q2 + q3*q3)
+    if norm > 0:
+        q0 /= norm
+        q1 /= norm
+        q2 /= norm
+        q3 /= norm
+
+    return np.array([q0, q1, q2, q3])
+
+
+# ---------------------------------------------------------------------------
+# Mahony 互补滤波器
+# ---------------------------------------------------------------------------
+
+
+def mahony_update_6dof(q, gyr, acc, dt, kp=1.0, ki=0.0, integral_fb=None):
+    """适用于 6 自由度 IMU（加速度计 + 陀螺仪）的 Mahony AHRS 更新。
+
+    参数
+    ----------
+    q : 数组类 [w, x, y, z]
+    gyr : 数组类 [gx, gy, gz]，单位为 rad/s
+    acc : 数组类 [ax, ay, az]
+    dt : float – 以秒为单位的时间步长
+    kp : float – 比例增益
+    ki : float – 积分增益
+    integral_fb : numpy.ndarray shape(3,) 或 None
+        积分反馈项，由调用方维护状态，函数内部会就地修改。
+        若为 None 则不使用积分项。
+
+    返回
+    -------
+    numpy.ndarray – 更新后的单位四元数 [w, x, y, z]
+    """
+    q0, q1, q2, q3 = q
+    gx, gy, gz = gyr
+    ax, ay, az = acc
+
+    norm = math.sqrt(ax * ax + ay * ay + az * az)
+    if norm == 0:
+        return np.array(q, dtype=float)
+    ax /= norm
+    ay /= norm
+    az /= norm
+
+    # 从四元数估计的重力方向（旋转矩阵第三列）
+    vx = 2.0 * (q1 * q3 - q0 * q2)
+    vy = 2.0 * (q0 * q1 + q2 * q3)
+    vz = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3
+
+    # 误差为测量重力与估计重力的叉积
+    ex = ay * vz - az * vy
+    ey = az * vx - ax * vz
+    ez = ax * vy - ay * vx
+
+    if integral_fb is not None and ki > 0:
+        integral_fb[0] += ki * ex * dt
+        integral_fb[1] += ki * ey * dt
+        integral_fb[2] += ki * ez * dt
+        gx += integral_fb[0]
+        gy += integral_fb[1]
+        gz += integral_fb[2]
+
+    gx += kp * ex
+    gy += kp * ey
+    gz += kp * ez
+
+    # 四元数微分方程积分
+    halfdt = 0.5 * dt
+    q0 += (-q1 * gx - q2 * gy - q3 * gz) * halfdt
+    q1 += (q0 * gx + q2 * gz - q3 * gy) * halfdt
+    q2 += (q0 * gy - q1 * gz + q3 * gx) * halfdt
+    q3 += (q0 * gz + q1 * gy - q2 * gx) * halfdt
+
+    norm = math.sqrt(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3)
+    if norm > 0:
+        q0 /= norm
+        q1 /= norm
+        q2 /= norm
+        q3 /= norm
+
+    return np.array([q0, q1, q2, q3])
+
+
+def mahony_update_9dof(q, gyr, acc, mag, dt, kp=1.0, ki=0.0, integral_fb=None):
+    """适用于 9 自由度 MARG（加速度计 + 陀螺仪 + 磁力计）的 Mahony AHRS 更新。
+    当磁力计模为零时，回退到 6 自由度更新。
+
+    参数
+    ----------
+    q : 数组类 [w, x, y, z]
+    gyr : 数组类 [gx, gy, gz]，单位为 rad/s
+    acc : 数组类 [ax, ay, az]
+    mag : 数组类 [mx, my, mz]
+    dt : float – 以秒为单位的时间步长
+    kp : float – 比例增益
+    ki : float – 积分增益
+    integral_fb : numpy.ndarray shape(3,) 或 None
+        积分反馈项，由调用方维护状态，函数内部会就地修改。
+
+    返回
+    -------
+    numpy.ndarray – 更新后的单位四元数 [w, x, y, z]
+    """
+    q0, q1, q2, q3 = q
+    gx, gy, gz = gyr
+    ax, ay, az = acc
+    mx, my, mz = mag
+
+    norm = math.sqrt(ax * ax + ay * ay + az * az)
+    if norm == 0:
+        return np.array(q, dtype=float)
+    ax /= norm
+    ay /= norm
+    az /= norm
+
+    norm = math.sqrt(mx * mx + my * my + mz * mz)
+    if norm == 0:
+        return mahony_update_6dof(q, gyr, acc, dt, kp, ki, integral_fb)
+    mx /= norm
+    my /= norm
+    mz /= norm
+
+    q0q0 = q0 * q0
+    q0q1 = q0 * q1
+    q0q2 = q0 * q2
+    q0q3 = q0 * q3
+    q1q1 = q1 * q1
+    q1q2 = q1 * q2
+    q1q3 = q1 * q3
+    q2q2 = q2 * q2
+    q2q3 = q2 * q3
+    q3q3 = q3 * q3
+
+    # 将磁力计读数旋转到地球坐标系
+    hx = (2.0 * (mx * (0.5 - q2q2 - q3q3) + my * (q1q2 - q0q3) + mz * (q1q3 + q0q2)))
+    hy = (2.0 * (mx * (q1q2 + q0q3) + my * (0.5 - q1q1 - q3q3) + mz * (q2q3 - q0q1)))
+
+    # 地球坐标系中的参考磁场方向
+    bx = math.sqrt(hx * hx + hy * hy)
+    bz = (2.0 * (mx * (q1q3 - q0q2) + my * (q2q3 + q0q1) + mz * (0.5 - q1q1 - q2q2)))
+
+    # 从四元数估计的重力方向
+    vx = 2.0 * (q1q3 - q0q2)
+    vy = 2.0 * (q0q1 + q2q3)
+    vz = q0q0 - q1q1 - q2q2 + q3q3
+
+    # 从四元数估计的磁场方向
+    wx = 2.0 * (bx * (0.5 - q2q2 - q3q3) + bz * (q1q3 - q0q2))
+    wy = 2.0 * (bx * (q1q2 - q0q3) + bz * (q0q1 + q2q3))
+    wz = 2.0 * (bx * (q0q2 + q1q3) + bz * (0.5 - q1q1 - q2q2))
+
+    # 误差为加速度计和磁力计测量值与估计方向的叉积之和
+    ex = (ay * vz - az * vy) + (my * wz - mz * wy)
+    ey = (az * vx - ax * vz) + (mz * wx - mx * wz)
+    ez = (ax * vy - ay * vx) + (mx * wy - my * wx)
+
+    if integral_fb is not None and ki > 0:
+        integral_fb[0] += ki * ex * dt
+        integral_fb[1] += ki * ey * dt
+        integral_fb[2] += ki * ez * dt
+        gx += integral_fb[0]
+        gy += integral_fb[1]
+        gz += integral_fb[2]
+
+    gx += kp * ex
+    gy += kp * ey
+    gz += kp * ez
+
+    halfdt = 0.5 * dt
+    q0 += (-q1 * gx - q2 * gy - q3 * gz) * halfdt
+    q1 += (q0 * gx + q2 * gz - q3 * gy) * halfdt
+    q2 += (q0 * gy - q1 * gz + q3 * gx) * halfdt
+    q3 += (q0 * gz + q1 * gy - q2 * gx) * halfdt
+
+    norm = math.sqrt(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3)
     if norm > 0:
         q0 /= norm
         q1 /= norm

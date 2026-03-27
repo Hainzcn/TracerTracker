@@ -30,6 +30,7 @@ class MainWindow(QMainWindow):
         self.pose_processor.position_updated.connect(self.on_pose_updated)
         self.pose_processor.log_message.connect(self.on_pose_log)
         self.pose_processor.parsed_data_updated.connect(self.on_parsed_data_updated)
+        self.pose_processor.filter_quaternions_updated.connect(self.on_filter_quaternions_updated)
         
         # 中心部件与布局
         self.central_widget = QWidget()
@@ -276,6 +277,11 @@ class MainWindow(QMainWindow):
         """处理来自 PoseProcessor 的位置更新。"""
         # 计算路径使用青色
         self.viewer.update_point(name, x, y, z, color=[0, 255, 255, 255], size=15)
+
+    def on_filter_quaternions_updated(self, madgwick_q, mahony_q):
+        """更新 Madgwick / Mahony 姿态立方体。"""
+        self.attitude_widget.update_madgwick_quaternion(*madgwick_q)
+        self.attitude_widget.update_mahony_quaternion(*mahony_q)
         
     def on_pose_log(self, message):
         """处理来自 PoseProcessor 的日志消息。"""
