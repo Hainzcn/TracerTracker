@@ -28,9 +28,11 @@ class Viewer3D(gl.GLViewWidget):
         # 相机初始状态
         self.initial_state = {
             'distance': 80,
-            'elevation': 45,
+            'elevation': 30,
             'azimuth': -135,
-            'center': QVector3D(0, 0, 0)
+            'center': QVector3D(0, 0, 0),
+            'pan_x': 0,
+            'pan_y': -5,
         }
         
         # 初始化相机与背景
@@ -78,7 +80,11 @@ class Viewer3D(gl.GLViewWidget):
         self.mousePos = QPoint()
         
         # 自定义相机平移偏移（屏幕空间平移）
-        self.pan_offset = QVector3D(0, 0, 0)
+        self.pan_offset = QVector3D(
+            self.initial_state['pan_x'],
+            self.initial_state['pan_y'],
+            0,
+        )
         
         # 启用键盘焦点
         self.setFocusPolicy(Qt.StrongFocus)
@@ -205,10 +211,9 @@ class Viewer3D(gl.GLViewWidget):
         self.addItem(self.y_axis)
         self.addItem(self.z_axis)
 
-        label_color = QColor(240, 240, 240, 255)
-        self.x_label = self._create_axis_label('X', [20.0, 0.0, 0.0], label_color)
-        self.y_label = self._create_axis_label('Y', [0.0, 20.0, 0.0], label_color)
-        self.z_label = self._create_axis_label('Z', [0.0, 0.0, 20.0], label_color)
+        self.x_label = self._create_axis_label('X', [20.0, 0.0, 0.0], QColor(255, 0, 0, 255))
+        self.y_label = self._create_axis_label('Y', [0.0, 20.0, 0.0], QColor(0, 255, 0, 255))
+        self.z_label = self._create_axis_label('Z', [0.0, 0.0, 20.0], QColor(0, 0, 255, 255))
 
         # 刻度线：用单个 GLLinePlotItem 容纳所有刻度几何体
         self.tick_line_item = gl.GLLinePlotItem(width=1.5, antialias=True, mode='lines')
@@ -673,8 +678,8 @@ class Viewer3D(gl.GLViewWidget):
             'distance': target_dist,
             'elevation': current_cam['elevation'],
             'azimuth': current_cam['azimuth'],
-            'pan_x': 0,
-            'pan_y': 0,
+            'pan_x': self.initial_state['pan_x'],
+            'pan_y': self.initial_state['pan_y'],
         }
 
         self.animation_start_time = QTime.currentTime()
@@ -775,8 +780,8 @@ class Viewer3D(gl.GLViewWidget):
             'distance': target_distance,
             'elevation': self.initial_state['elevation'],
             'azimuth': effective_target_azim,
-            'pan_x': 0,
-            'pan_y': 0,
+            'pan_x': self.initial_state['pan_x'],
+            'pan_y': self.initial_state['pan_y'],
         }
 
         self.animation_start_time = QTime.currentTime()

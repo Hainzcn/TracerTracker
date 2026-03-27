@@ -409,7 +409,7 @@ class MainWindow(QMainWindow):
         ctrl_h = 24
 
         # ── Serial section ──
-        serial_label = QLabel("串口:")
+        serial_label = QLabel("串口 ")
         serial_label.setStyleSheet(self._style_label)
         top_layout.addWidget(serial_label)
 
@@ -447,7 +447,7 @@ class MainWindow(QMainWindow):
         top_layout.addSpacing(16)
 
         # ── UDP section ──
-        udp_port_label = QLabel("UDP端口:")
+        udp_port_label = QLabel("UDP端口 ")
         udp_port_label.setStyleSheet(self._style_label)
         top_layout.addWidget(udp_port_label)
 
