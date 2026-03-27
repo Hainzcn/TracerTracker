@@ -42,7 +42,7 @@ class Viewer3D(gl.GLViewWidget):
         self.setBackgroundColor('#121212')  # 深色背景
 
         # 坐标系视觉参数（必须在 add_custom_axes 之前设置）
-        self.AXIS_VISUAL_RATIO = 0.35
+        self.AXIS_VISUAL_RATIO = 0.28
         self.TICK_LABEL_POOL_SIZE = 30
         self.TICK_LINE_LENGTH_RATIO = 0.02
         
@@ -344,6 +344,30 @@ class Viewer3D(gl.GLViewWidget):
         self.grid_minor.setColor((0, 255, 255, max(minor_alpha, 0)))
         self.grid_minor.setVisible(minor_alpha > 0)
         
+    def clear_all(self):
+        """Remove all tracked points, paths, trails and associated data."""
+        for item in self.points.values():
+            self.removeItem(item)
+        for item in self.path_items.values():
+            self.removeItem(item)
+        for item in self.trail_items.values():
+            if isinstance(item, dict):
+                for layer in item.get('core', []):
+                    self.removeItem(layer)
+                for layer in item.get('glow', []):
+                    self.removeItem(layer)
+            else:
+                self.removeItem(item)
+        self.points.clear()
+        self.point_histories.clear()
+        self.point_speeds.clear()
+        self.point_times.clear()
+        self.point_colors.clear()
+        self.path_items.clear()
+        self.trail_items.clear()
+        self.first_point_rendered = False
+        self.update()
+
     def update_point(self, name, x, y, z, color=(1, 0, 0, 1), size=10):
         """更新或创建 3D 视图中的追踪点。"""
         current_pos = np.array([x, y, z], dtype=float)

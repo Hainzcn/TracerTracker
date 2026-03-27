@@ -50,6 +50,16 @@ class SensorInfoOverlay(QWidget):
         self._has_data = False
         self.setVisible(False)
 
+    def reset(self):
+        """Clear all sensor data and hide the widget."""
+        self._has_data = False
+        self._ref_pressure = None
+        self._ref_altitude = None
+        self.acc_label.setText("ACC: --")
+        self.vel_label.setText("VEL: --")
+        self.alt_label.setText("\u0394Alt: --")
+        self.setVisible(False)
+
     def update_acceleration(self, ax, ay, az):
         """更新显示的加速度 (m/s^2)。"""
         if not self._has_data:

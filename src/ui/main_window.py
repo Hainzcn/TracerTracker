@@ -1,9 +1,13 @@
 import logging
 import time
 
-from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget, QLabel, QHBoxLayout, QSizePolicy, QTextEdit, QCheckBox, QSpinBox, QSplitter, QPushButton
+from PySide6.QtWidgets import (
+    QMainWindow, QVBoxLayout, QWidget, QLabel, QHBoxLayout, QSizePolicy,
+    QTextEdit, QCheckBox, QSpinBox, QSplitter, QPushButton, QComboBox, QFrame,
+)
 from PySide6.QtCore import QTimer, Qt, QEvent
 from PySide6.QtGui import QTextCursor
+import serial.tools.list_ports
 from src.ui.viewer_3d import Viewer3D
 from src.ui.attitude_widget import AttitudeWidget
 from src.ui.sensor_info_overlay import SensorInfoOverlay
@@ -24,7 +28,7 @@ class MainWindow(QMainWindow):
         self.data_receiver = DataReceiver(self.config_loader)
         self.data_receiver.data_received.connect(self.on_data_received)
         self.data_receiver.raw_data_received.connect(self.on_raw_data_received)
-        self.data_receiver.start()
+        self.data_receiver.serial_stopped.connect(self._on_serial_stopped)
         
         self.pose_processor = PoseProcessor(self.config_loader)
         self.pose_processor.position_updated.connect(self.on_pose_updated)
@@ -39,10 +43,13 @@ class MainWindow(QMainWindow):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
         
+        self._build_top_bar()
+        self.layout.addWidget(self.top_bar_widget)
+        
         self.viewer = Viewer3D()
         self.viewer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.viewer.log_message.connect(self.on_pose_log) # 复用日志处理器
-        self.layout.addWidget(self.viewer, 1) # 添加拉伸因子 1 以占据可用空间
+        self.viewer.log_message.connect(self.on_pose_log)
+        self.layout.addWidget(self.viewer, 1)
         render_debug_cfg = self.config_loader.get_render_debug_config()
         self.viewer.set_render_debug_options(
             enabled=render_debug_cfg.get("enabled", False),
@@ -97,22 +104,7 @@ class MainWindow(QMainWindow):
         
         # 切换解析视图复选框
         self.parsed_view_checkbox = QCheckBox("解析视图")
-        self.parsed_view_checkbox.setStyleSheet("""
-            QCheckBox {
-                color: #888;
-                padding-left: 5px;
-            }
-            QCheckBox::indicator {
-                width: 13px;
-                height: 13px;
-                border: 1px solid #555;
-                background: #1e1e1e;
-            }
-            QCheckBox::indicator:checked {
-                background: #4CAF50;
-                border: 1px solid #4CAF50;
-            }
-        """)
+        self.parsed_view_checkbox.setStyleSheet(self._style_checkbox)
         self.parsed_view_checkbox.stateChanged.connect(self.toggle_parse_view)
         self.show_parsed_data = False
         
@@ -137,72 +129,54 @@ class MainWindow(QMainWindow):
         
         self.layout.addWidget(self.debug_splitter)
         
-        # 状态栏区域（自定义叠加层或底部栏）
+        # 状态栏区域
         self.status_bar_widget = QWidget()
         self.status_bar_layout = QHBoxLayout(self.status_bar_widget)
-        self.status_bar_layout.setContentsMargins(10, 5, 10, 5)
+        self.status_bar_layout.setContentsMargins(10, 0, 10, 0)
         self.status_bar_widget.setStyleSheet("background-color: #252526; border-top: 1px solid #333;")
-        self.status_bar_widget.setFixedHeight(30) # 状态栏固定高度
-        
+        self.status_bar_widget.setFixedHeight(32)
+
+        self._status_label_style = "color: #999; font-size: 12px; border: none;"
+
         self.udp_status_label = QLabel("UDP: Idle")
-        self.udp_status_label.setStyleSheet("color: #888;")
+        self.udp_status_label.setStyleSheet(self._status_label_style)
         self.serial_status_label = QLabel("Serial: Idle")
-        self.serial_status_label.setStyleSheet("color: #888;")
-        
+        self.serial_status_label.setStyleSheet(self._status_label_style)
+        self._status_label_active_style = "color: #4CAF50; font-size: 12px; border: none;"
+
         self.status_bar_layout.addWidget(self.udp_status_label)
         self.status_bar_layout.addSpacing(20)
         self.status_bar_layout.addWidget(self.serial_status_label)
         self.status_bar_layout.addStretch()
-        
-        # 调试切换复选框
+
         self.debug_checkbox = QCheckBox("调试日志")
-        self.debug_checkbox.setStyleSheet("""
-            QCheckBox {
-                color: #888;
-            }
-            QCheckBox::indicator {
-                width: 13px;
-                height: 13px;
-                border: 1px solid #555;
-                background: #1e1e1e;
-            }
-            QCheckBox::indicator:checked {
-                background: #4CAF50;
-                border: 1px solid #4CAF50;
-            }
-        """)
+        self.debug_checkbox.setStyleSheet(self._style_checkbox)
         self.debug_checkbox.stateChanged.connect(self.toggle_debug_console)
         self.status_bar_layout.addWidget(self.debug_checkbox)
 
         self.full_path_checkbox = QCheckBox("全路径")
-        self.full_path_checkbox.setStyleSheet(self.debug_checkbox.styleSheet())
+        self.full_path_checkbox.setStyleSheet(self._style_checkbox)
         self.full_path_checkbox.toggled.connect(self.toggle_full_path_mode)
         self.status_bar_layout.addSpacing(12)
         self.status_bar_layout.addWidget(self.full_path_checkbox)
 
         self.trail_checkbox = QCheckBox("速度尾迹")
-        self.trail_checkbox.setStyleSheet(self.debug_checkbox.styleSheet())
+        self.trail_checkbox.setStyleSheet(self._style_checkbox)
         self.trail_checkbox.toggled.connect(self.toggle_trail_mode)
         self.status_bar_layout.addSpacing(8)
         self.status_bar_layout.addWidget(self.trail_checkbox)
 
         self.trail_length_label = QLabel("长度")
-        self.trail_length_label.setStyleSheet("color: #888;")
+        self.trail_length_label.setStyleSheet("color: #555; font-size: 12px; border: none;")
         self.status_bar_layout.addSpacing(4)
         self.status_bar_layout.addWidget(self.trail_length_label)
 
         self.trail_length_spinbox = QSpinBox()
         self.trail_length_spinbox.setRange(10, 5000)
         self.trail_length_spinbox.setValue(120)
-        self.trail_length_spinbox.setFixedWidth(80)
-        self.trail_length_spinbox.setStyleSheet("""
-            QSpinBox {
-                color: #d4d4d4;
-                background-color: #1e1e1e;
-                border: 1px solid #555;
-                padding: 1px 4px;
-            }
-        """)
+        self.trail_length_spinbox.setFixedWidth(72)
+        self.trail_length_spinbox.setFixedHeight(20)
+        self.trail_length_spinbox.setStyleSheet(self._style_spinbox)
         self.trail_length_spinbox.valueChanged.connect(self.on_trail_length_changed)
         self.status_bar_layout.addWidget(self.trail_length_spinbox)
         self.trail_length_spinbox.setEnabled(False)
@@ -227,6 +201,232 @@ class MainWindow(QMainWindow):
         self.viewer.set_trail_length(self.trail_length_spinbox.value())
         QTimer.singleShot(0, self._reposition_overlays)
         
+    # ── Shared bar styles ────────────────────────────────────────────
+
+    def _init_bar_styles(self):
+        """Define unified style constants shared by top bar and bottom bar."""
+        self._style_label = "color: #999; font-size: 12px; border: none;"
+        self._style_combo = """
+            QComboBox {
+                color: #ccc; font-size: 12px;
+                background: transparent;
+                border: 1px solid #444; border-radius: 4px;
+                padding: 2px 22px 2px 8px; min-width: 120px;
+            }
+            QComboBox:disabled { color: #555; border-color: #333; }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                width: 18px; border: none;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #999;
+                width: 0; height: 0;
+                margin-right: 4px;
+            }
+            QComboBox QAbstractItemView {
+                color: #ccc; background-color: #2d2d2d;
+                selection-background-color: #094771;
+                font-size: 12px;
+                border: none; outline: none;
+            }
+        """
+        self._style_spinbox = """
+            QSpinBox {
+                color: #ccc; font-size: 12px;
+                background: transparent;
+                border: 1px solid #444; border-radius: 4px;
+                padding: 2px 8px;
+            }
+            QSpinBox:disabled { color: #555; border-color: #333; }
+            QSpinBox::up-button, QSpinBox::down-button {
+                width: 0; height: 0; border: none;
+            }
+        """
+        self._style_btn_idle = """
+            QPushButton {
+                color: #ccc; font-size: 12px;
+                background: transparent;
+                border: 1px solid #444; border-radius: 4px;
+                padding: 2px 12px;
+            }
+            QPushButton:hover { background-color: #3a3a3a; }
+            QPushButton:disabled { color: #555; border-color: #333; }
+        """
+        self._style_btn_active = """
+            QPushButton {
+                color: #fff; font-size: 12px;
+                background-color: #388E3C;
+                border: 1px solid #4CAF50; border-radius: 4px;
+                padding: 2px 12px;
+            }
+            QPushButton:hover { background-color: #43A047; }
+        """
+        self._style_checkbox = """
+            QCheckBox {
+                color: #999; font-size: 12px; spacing: 4px;
+            }
+            QCheckBox:disabled { color: #555; }
+            QCheckBox::indicator {
+                width: 13px; height: 13px;
+                border: 1px solid #444; border-radius: 2px;
+                background: transparent;
+            }
+            QCheckBox::indicator:checked {
+                background: #4CAF50; border-color: #4CAF50;
+            }
+            QCheckBox::indicator:disabled {
+                border-color: #333; background: transparent;
+            }
+            QCheckBox::indicator:checked:disabled {
+                background: #555; border-color: #555;
+            }
+        """
+
+    # ── Top bar construction & handlers ──────────────────────────────
+
+    def _build_top_bar(self):
+        self._init_bar_styles()
+
+        self.top_bar_widget = QWidget()
+        self.top_bar_widget.setFixedHeight(32)
+        self.top_bar_widget.setStyleSheet(
+            "background-color: #252526; border-bottom: 1px solid #333;"
+        )
+        top_layout = QHBoxLayout(self.top_bar_widget)
+        top_layout.setContentsMargins(10, 0, 10, 0)
+        top_layout.setSpacing(6)
+
+        ctrl_h = 24
+
+        # ── Serial section ──
+        serial_label = QLabel("串口:")
+        serial_label.setStyleSheet(self._style_label)
+        top_layout.addWidget(serial_label)
+
+        self.serial_combo = QComboBox()
+        self.serial_combo.setFixedHeight(ctrl_h)
+        self.serial_combo.setStyleSheet(self._style_combo)
+        self.serial_combo.view().window().setWindowFlags(
+            Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint
+        )
+        self._refresh_serial_ports()
+        top_layout.addWidget(self.serial_combo)
+
+        self.serial_refresh_btn = QPushButton("⟳")
+        self.serial_refresh_btn.setFixedSize(ctrl_h, ctrl_h)
+        self.serial_refresh_btn.setStyleSheet(self._style_btn_idle)
+        self.serial_refresh_btn.setToolTip("刷新串口列表")
+        self.serial_refresh_btn.clicked.connect(self._refresh_serial_ports)
+        top_layout.addWidget(self.serial_refresh_btn)
+
+        self.serial_toggle_btn = QPushButton("打开串口")
+        self.serial_toggle_btn.setFixedHeight(ctrl_h)
+        self.serial_toggle_btn.setStyleSheet(self._style_btn_idle)
+        self.serial_toggle_btn.clicked.connect(self._toggle_serial)
+        top_layout.addWidget(self.serial_toggle_btn)
+
+        # ── Separator ──
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setStyleSheet("color: #444; border: none;")
+        top_layout.addWidget(sep)
+
+        # ── UDP section ──
+        udp_label = QLabel("UDP端口:")
+        udp_label.setStyleSheet(self._style_label)
+        top_layout.addWidget(udp_label)
+
+        udp_config = self.config_loader.get_udp_config()
+        self.udp_port_spin = QSpinBox()
+        self.udp_port_spin.setRange(1, 65535)
+        self.udp_port_spin.setValue(udp_config.get("port", 8888))
+        self.udp_port_spin.setFixedHeight(ctrl_h)
+        self.udp_port_spin.setFixedWidth(72)
+        self.udp_port_spin.setStyleSheet(self._style_spinbox)
+        top_layout.addWidget(self.udp_port_spin)
+
+        self.udp_toggle_btn = QPushButton("接收UDP")
+        self.udp_toggle_btn.setFixedHeight(ctrl_h)
+        self.udp_toggle_btn.setStyleSheet(self._style_btn_idle)
+        self.udp_toggle_btn.clicked.connect(self._toggle_udp)
+        top_layout.addWidget(self.udp_toggle_btn)
+
+        top_layout.addStretch()
+
+    def _refresh_serial_ports(self):
+        current = self.serial_combo.currentText()
+        self.serial_combo.clear()
+        ports = serial.tools.list_ports.comports()
+        serial_config = self.config_loader.get_serial_config()
+        cfg_port = serial_config.get("port", "")
+        select_idx = 0
+        for i, info in enumerate(sorted(ports, key=lambda p: p.device)):
+            label = f"{info.device}  {info.description}" if info.description and info.description != "n/a" else info.device
+            self.serial_combo.addItem(label, userData=info.device)
+            if info.device == current or (not current and info.device == cfg_port):
+                select_idx = i
+        if self.serial_combo.count() > 0:
+            self.serial_combo.setCurrentIndex(select_idx)
+
+    def _toggle_serial(self):
+        if self.data_receiver.is_serial_running:
+            self.data_receiver.stop_serial()
+            self._set_serial_ui_idle()
+        else:
+            if self.serial_combo.count() == 0:
+                return
+            port = self.serial_combo.currentData()
+            serial_cfg = self.config_loader.get_serial_config()
+            self.data_receiver.start_serial(
+                port=port,
+                baudrate=serial_cfg.get("baudrate", 115200),
+                protocol=serial_cfg.get("protocol", "csv"),
+                timeout=serial_cfg.get("timeout", 1),
+                acc_fsr=serial_cfg.get("acc_fsr", 4),
+                gyro_fsr=serial_cfg.get("gyro_fsr", 2000),
+            )
+            self.serial_toggle_btn.setText("关闭串口")
+            self.serial_toggle_btn.setStyleSheet(self._style_btn_active)
+            self.serial_combo.setEnabled(False)
+            self.serial_refresh_btn.setEnabled(False)
+
+    def _toggle_udp(self):
+        if self.data_receiver.is_udp_running:
+            self.data_receiver.stop_udp()
+            self.udp_toggle_btn.setText("接收UDP")
+            self.udp_toggle_btn.setStyleSheet(self._style_btn_idle)
+            self.udp_port_spin.setEnabled(True)
+        else:
+            udp_cfg = self.config_loader.get_udp_config()
+            ip = udp_cfg.get("ip", "127.0.0.1")
+            port = self.udp_port_spin.value()
+            self.data_receiver.start_udp(ip, port)
+            self.udp_toggle_btn.setText("停止接收")
+            self.udp_toggle_btn.setStyleSheet(self._style_btn_active)
+            self.udp_port_spin.setEnabled(False)
+
+    def _set_serial_ui_idle(self):
+        self.serial_toggle_btn.setText("打开串口")
+        self.serial_toggle_btn.setStyleSheet(self._style_btn_idle)
+        self.serial_combo.setEnabled(True)
+        self.serial_refresh_btn.setEnabled(True)
+        self._clear_scene()
+
+    def _on_serial_stopped(self):
+        """Handle asynchronous serial disconnect (cable unplug, error, etc.)."""
+        self._set_serial_ui_idle()
+
+    def _clear_scene(self):
+        """Clear all cached data, 3D points, overlays and reset processors."""
+        self.viewer.clear_all()
+        self.attitude_widget.reset()
+        self.sensor_overlay.reset()
+        self.pose_processor.reset()
+
     def toggle_debug_console(self, state):
         """切换调试控制台的可见性。"""
         if state:
@@ -243,6 +443,9 @@ class MainWindow(QMainWindow):
         self.viewer.set_trail_mode(checked)
         self.trail_length_spinbox.setEnabled(checked)
         self.trail_length_label.setEnabled(checked)
+        self.trail_length_label.setStyleSheet(
+            self._status_label_style if checked else "color: #555; font-size: 12px; border: none;"
+        )
 
     def on_trail_length_changed(self, value):
         self.viewer.set_trail_length(value)
@@ -361,11 +564,11 @@ class MainWindow(QMainWindow):
         if source == "udp":
             self.last_udp_time = current_time
             self.udp_status_label.setText(f"UDP: {status_text}")
-            self.udp_status_label.setStyleSheet("color: #4CAF50;") # 绿色
+            self.udp_status_label.setStyleSheet(self._status_label_active_style)
         elif source == "serial":
             self.last_serial_time = current_time
             self.serial_status_label.setText(f"Serial: {status_text}")
-            self.serial_status_label.setStyleSheet("color: #4CAF50;") # 绿色
+            self.serial_status_label.setStyleSheet(self._status_label_active_style)
         
         points_config = self.config_loader.get("points", [])
         
@@ -427,11 +630,11 @@ class MainWindow(QMainWindow):
         
         if current_time - self.last_udp_time > timeout:
             self.udp_status_label.setText("UDP: Idle")
-            self.udp_status_label.setStyleSheet("color: #888;") # 灰色
-            
+            self.udp_status_label.setStyleSheet(self._status_label_style)
+
         if current_time - self.last_serial_time > timeout:
             self.serial_status_label.setText("Serial: Idle")
-            self.serial_status_label.setStyleSheet("color: #888;") # 灰色
+            self.serial_status_label.setStyleSheet(self._status_label_style)
 
     def eventFilter(self, obj, event):
         if obj is self.viewer and event.type() == QEvent.Resize:

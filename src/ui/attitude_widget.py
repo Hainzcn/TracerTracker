@@ -98,6 +98,15 @@ class AttitudeWidget(QWidget):
     def _euler_text(roll, pitch, yaw):
         return f"R:{roll:+6.1f}\u00b0 P:{pitch:+6.1f}\u00b0 Y:{yaw:+6.1f}\u00b0"
 
+    def reset(self):
+        """Clear all attitude data and hide the widget."""
+        self._has_data = False
+        self.setVisible(False)
+        placeholder = "R:  --    P:  --    Y:  --"
+        self.label_raw.setText(placeholder)
+        self.label_madgwick.setText(placeholder)
+        self.label_mahony.setText(placeholder)
+
     def _ensure_visible(self):
         if not self._has_data:
             self._has_data = True
