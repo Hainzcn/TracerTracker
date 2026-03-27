@@ -1,8 +1,8 @@
 import math
 import numpy as np
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPainterPath, QRegion
 import pyqtgraph.opengl as gl
 
 
@@ -27,10 +27,18 @@ class AttitudeWidget(QWidget):
     """
     显示 3 个 3D 姿态立方体和姿态角文本的叠加部件。
     第一个为原生四元数，第二个为 Madgwick，第三个为 Mahony。
+    姿态角分三行显示于立方体左侧，Roll/Pitch/Yaw 分别着色。
     """
 
     _CUBE_SIZE = 120
-    _WIDGET_WIDTH = 150
+    _ANGLE_COL_WIDTH = 80
+    _WIDGET_WIDTH = _ANGLE_COL_WIDTH + _CUBE_SIZE + 10
+
+    _ANGLE_FONT = "font-family: Consolas, monospace; font-size: 13px;"
+    _ANGLE_COMMON = "background: transparent; padding: 0px; margin: 0px;"
+    _ROLL_STYLE  = f"QLabel {{ color: #ff6b6b; {_ANGLE_FONT} {_ANGLE_COMMON} }}"
+    _PITCH_STYLE = f"QLabel {{ color: #69db7c; {_ANGLE_FONT} {_ANGLE_COMMON} }}"
+    _YAW_STYLE   = f"QLabel {{ color: #4dabf7; {_ANGLE_FONT} {_ANGLE_COMMON} }}"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -41,17 +49,7 @@ class AttitudeWidget(QWidget):
             "  color: #999999;"
             "  background: transparent;"
             "  font-family: Consolas, monospace;"
-            "  font-size: 9px;"
-            "  padding: 0px;"
-            "  margin: 0px;"
-            "}"
-        )
-        self._angle_style = (
-            "QLabel {"
-            "  color: #cccccc;"
-            "  background: transparent;"
-            "  font-family: Consolas, monospace;"
-            "  font-size: 9px;"
+            "  font-size: 12px;"
             "  padding: 0px;"
             "  margin: 0px;"
             "}"
@@ -61,51 +59,77 @@ class AttitudeWidget(QWidget):
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(0)
 
-        self.cube_raw, self.label_raw = self._add_cube_group(layout, "Raw")
-        self.cube_madgwick, self.label_madgwick = self._add_cube_group(layout, "Madgwick")
-        self.cube_mahony, self.label_mahony = self._add_cube_group(layout, "Mahony")
+        self.cube_raw, self.labels_raw = self._add_cube_group(layout, "Raw")
+        self.cube_madgwick, self.labels_madgwick = self._add_cube_group(layout, "Madgwick")
+        self.cube_mahony, self.labels_mahony = self._add_cube_group(layout, "Mahony")
 
-        group_h = 12 + self._CUBE_SIZE + 14
+        group_h = 16 + self._CUBE_SIZE
         total_h = 2 + 3 * group_h + 2
         self.setFixedSize(self._WIDGET_WIDTH, total_h)
-        self.setStyleSheet(
-            "AttitudeWidget { background: rgba(18, 18, 18, 180); border-radius: 6px; }"
-        )
 
         self._has_data = False
         self.setVisible(False)
 
     def _add_cube_group(self, parent_layout, title_text):
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(1)
+
+        angle_col = QVBoxLayout()
+        angle_col.setContentsMargins(0, 0, 0, 0)
+        angle_col.setSpacing(6)
+
+        roll_lbl = QLabel("R:   --")
+        roll_lbl.setStyleSheet(self._ROLL_STYLE)
+        pitch_lbl = QLabel("P:   --")
+        pitch_lbl.setStyleSheet(self._PITCH_STYLE)
+        yaw_lbl = QLabel("Y:   --")
+        yaw_lbl.setStyleSheet(self._YAW_STYLE)
+        for lbl in (roll_lbl, pitch_lbl, yaw_lbl):
+            lbl.setFixedWidth(self._ANGLE_COL_WIDTH)
+
+        angle_col.addStretch()
+        angle_col.addWidget(roll_lbl)
+        angle_col.addWidget(pitch_lbl)
+        angle_col.addWidget(yaw_lbl)
+        angle_col.addStretch()
+
+        row.addLayout(angle_col)
+
+        cube_col = QVBoxLayout()
+        cube_col.setContentsMargins(0, 0, 0, 0)
+        cube_col.setSpacing(0)
+
         title = QLabel(title_text)
         title.setAlignment(Qt.AlignCenter)
-        title.setFixedHeight(12)
+        title.setFixedSize(self._CUBE_SIZE, 16)
         title.setStyleSheet(self._title_style)
-        parent_layout.addWidget(title)
+        cube_col.addWidget(title)
 
         cube = _CubeGLWidget()
         cube.setFixedSize(self._CUBE_SIZE, self._CUBE_SIZE)
-        parent_layout.addWidget(cube, alignment=Qt.AlignCenter)
+        cube_col.addWidget(cube)
 
-        label = QLabel("R:  --    P:  --    Y:  --")
-        label.setAlignment(Qt.AlignCenter)
-        label.setFixedHeight(14)
-        label.setStyleSheet(self._angle_style)
-        parent_layout.addWidget(label)
+        row.addLayout(cube_col)
 
-        return cube, label
+        parent_layout.addLayout(row)
+
+        return cube, (roll_lbl, pitch_lbl, yaw_lbl)
 
     @staticmethod
-    def _euler_text(roll, pitch, yaw):
-        return f"R:{roll:+6.1f}\u00b0 P:{pitch:+6.1f}\u00b0 Y:{yaw:+6.1f}\u00b0"
+    def _set_euler_labels(labels, roll, pitch, yaw):
+        labels[0].setText(f"R:{roll:+6.1f}\u00b0")
+        labels[1].setText(f"P:{pitch:+6.1f}\u00b0")
+        labels[2].setText(f"Y:{yaw:+6.1f}\u00b0")
 
     def reset(self):
         """Clear all attitude data and hide the widget."""
         self._has_data = False
         self.setVisible(False)
-        placeholder = "R:  --    P:  --    Y:  --"
-        self.label_raw.setText(placeholder)
-        self.label_madgwick.setText(placeholder)
-        self.label_mahony.setText(placeholder)
+        for labels in (self.labels_raw, self.labels_madgwick, self.labels_mahony):
+            labels[0].setText("R:   --")
+            labels[1].setText("P:   --")
+            labels[2].setText("Y:   --")
 
     def _ensure_visible(self):
         if not self._has_data:
@@ -117,27 +141,27 @@ class AttitudeWidget(QWidget):
         self._ensure_visible()
         self.cube_raw.set_rotation_quaternion(q0, q1, q2, q3)
         r, p, y = _quat_to_euler(q0, q1, q2, q3)
-        self.label_raw.setText(self._euler_text(r, p, y))
+        self._set_euler_labels(self.labels_raw, r, p, y)
 
     def update_euler(self, roll, pitch, yaw):
         """原生欧拉角 -- 旋转第一个立方体，显示姿态角。"""
         self._ensure_visible()
         self.cube_raw.set_rotation_euler(roll, pitch, yaw)
-        self.label_raw.setText(self._euler_text(roll, pitch, yaw))
+        self._set_euler_labels(self.labels_raw, roll, pitch, yaw)
 
     def update_madgwick_quaternion(self, q0, q1, q2, q3):
         """Madgwick 滤波器四元数 -- 旋转第二个立方体，显示姿态角。"""
         self._ensure_visible()
         self.cube_madgwick.set_rotation_quaternion(q0, q1, q2, q3)
         r, p, y = _quat_to_euler(q0, q1, q2, q3)
-        self.label_madgwick.setText(self._euler_text(r, p, y))
+        self._set_euler_labels(self.labels_madgwick, r, p, y)
 
     def update_mahony_quaternion(self, q0, q1, q2, q3):
         """Mahony 滤波器四元数 -- 旋转第三个立方体，显示姿态角。"""
         self._ensure_visible()
         self.cube_mahony.set_rotation_quaternion(q0, q1, q2, q3)
         r, p, y = _quat_to_euler(q0, q1, q2, q3)
-        self.label_mahony.setText(self._euler_text(r, p, y))
+        self._set_euler_labels(self.labels_mahony, r, p, y)
 
     # 让鼠标事件穿透到下方的 3D 视图
     def mousePressEvent(self, ev):
@@ -156,11 +180,22 @@ class AttitudeWidget(QWidget):
 class _CubeGLWidget(gl.GLViewWidget):
     """渲染彩色姿态立方体的小型非交互式 GL 部件。"""
 
+    _CORNER_RADIUS = 12
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setBackgroundColor("#1a1a1a")
-        self.setCameraPosition(distance=4.5, elevation=25, azimuth=-45)
+        self.setBackgroundColor(QColor(30, 30, 30, 45))
+        self.setCameraPosition(distance=3.6, elevation=25, azimuth=-45)
         self._build_scene()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        path = QPainterPath()
+        path.addRoundedRect(
+            0, 0, self.width(), self.height(),
+            self._CORNER_RADIUS, self._CORNER_RADIUS,
+        )
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
 
     # ---- 场景构建 ------------------------------------------------
 
@@ -178,29 +213,6 @@ class _CubeGLWidget(gl.GLViewWidget):
         self.addItem(self.cube_item)
 
         self._body_items = [self.cube_item]
-
-        axis_len = 1.6
-        axis_defs = [
-            ([[0, 0, 0], [axis_len, 0, 0]], (1, 0.3, 0.3, 1), "X", QColor(255, 80, 80)),
-            ([[0, 0, 0], [0, axis_len, 0]], (0.3, 1, 0.3, 1), "Y", QColor(80, 255, 80)),
-            ([[0, 0, 0], [0, 0, axis_len]], (0.3, 0.3, 1, 1), "Z", QColor(80, 80, 255)),
-        ]
-        for pos_data, color, text, lbl_color in axis_defs:
-            line = gl.GLLinePlotItem(
-                pos=np.array(pos_data, dtype=np.float32),
-                color=color,
-                width=2,
-                antialias=True,
-            )
-            self.addItem(line)
-            self._body_items.append(line)
-            offset = np.array(pos_data[1], dtype=float) * (1 + 0.15 / axis_len)
-            try:
-                lbl = gl.GLTextItem(pos=offset, text=text, color=lbl_color)
-                self.addItem(lbl)
-                self._body_items.append(lbl)
-            except Exception:
-                pass
 
     @staticmethod
     def _cube_geometry():

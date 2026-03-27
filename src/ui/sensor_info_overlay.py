@@ -1,48 +1,76 @@
 import math
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QGridLayout, QLabel
 from PySide6.QtCore import Qt
 
 
 class SensorInfoOverlay(QWidget):
     """
-    位于 3D 视图左下角的半透明叠加层，显示加速度、速度和海拔变化信息。
+    位于 3D 视图右下角的半透明叠加层，显示加速度、速度和海拔变化信息。
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(260)
+        self.setFixedWidth(300)
         self.setStyleSheet(
             "SensorInfoOverlay {"
-            "  background: rgba(18, 18, 18, 200);"
-            "  border-radius: 6px;"
+            "  background-color: rgba(30, 30, 30, 200);"
+            "  border: 1px solid rgba(80, 80, 80, 150);"
+            "  border-radius: 8px;"
             "}"
         )
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(2)
+        layout = QGridLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(4)
 
-        label_style = (
+        label_title_style = (
             "QLabel {"
-            "  color: #d4d4d4;"
-            "  font-family: Consolas, monospace;"
-            "  font-size: 11px;"
+            "  color: #888888;"
+            "  font-family: 'Microsoft YaHei', sans-serif;"
+            "  font-size: 12px;"
+            "  font-weight: bold;"
+            "  background: transparent;"
+            "}"
+        )
+        
+        label_value_style = (
+            "QLabel {"
+            "  color: #e0e0e0;"
+            "  font-family: 'Consolas', 'JetBrains Mono', monospace;"
+            "  font-size: 13px;"
             "  background: transparent;"
             "}"
         )
 
-        self.acc_label = QLabel("ACC: --")
-        self.acc_label.setStyleSheet(label_style)
-        layout.addWidget(self.acc_label)
+        # Row 0: ACC
+        acc_title = QLabel("ACC")
+        acc_title.setStyleSheet(label_title_style)
+        layout.addWidget(acc_title, 0, 0, alignment=Qt.AlignRight | Qt.AlignVCenter)
+        
+        self.acc_val_label = QLabel("--")
+        self.acc_val_label.setStyleSheet(label_value_style)
+        layout.addWidget(self.acc_val_label, 0, 1, alignment=Qt.AlignLeft | Qt.AlignVCenter)
 
-        self.vel_label = QLabel("VEL: --")
-        self.vel_label.setStyleSheet(label_style)
-        layout.addWidget(self.vel_label)
+        # Row 1: VEL
+        vel_title = QLabel("VEL")
+        vel_title.setStyleSheet(label_title_style)
+        layout.addWidget(vel_title, 1, 0, alignment=Qt.AlignRight | Qt.AlignVCenter)
+        
+        self.vel_val_label = QLabel("--")
+        self.vel_val_label.setStyleSheet(label_value_style)
+        layout.addWidget(self.vel_val_label, 1, 1, alignment=Qt.AlignLeft | Qt.AlignVCenter)
 
-        self.alt_label = QLabel("\u0394Alt: --")
-        self.alt_label.setStyleSheet(label_style)
-        layout.addWidget(self.alt_label)
+        # Row 2: ΔAlt
+        alt_title = QLabel("ΔAlt")
+        alt_title.setStyleSheet(label_title_style)
+        layout.addWidget(alt_title, 2, 0, alignment=Qt.AlignRight | Qt.AlignVCenter)
+        
+        self.alt_val_label = QLabel("--")
+        self.alt_val_label.setStyleSheet(label_value_style)
+        layout.addWidget(self.alt_val_label, 2, 1, alignment=Qt.AlignLeft | Qt.AlignVCenter)
 
+        layout.setColumnStretch(1, 1)
         self.adjustSize()
 
         self._ref_pressure = None
@@ -55,9 +83,9 @@ class SensorInfoOverlay(QWidget):
         self._has_data = False
         self._ref_pressure = None
         self._ref_altitude = None
-        self.acc_label.setText("ACC: --")
-        self.vel_label.setText("VEL: --")
-        self.alt_label.setText("\u0394Alt: --")
+        self.acc_val_label.setText("--")
+        self.vel_val_label.setText("--")
+        self.alt_val_label.setText("--")
         self.setVisible(False)
 
     def update_acceleration(self, ax, ay, az):
@@ -65,11 +93,11 @@ class SensorInfoOverlay(QWidget):
         if not self._has_data:
             self._has_data = True
             self.setVisible(True)
-        self.acc_label.setText(f"ACC: {ax:+8.2f} {ay:+8.2f} {az:+8.2f} m/s\u00b2")
+        self.acc_val_label.setText(f"<span style='color:#ff6b6b'>{ax:+8.2f}</span> <span style='color:#69db7c'>{ay:+8.2f}</span> <span style='color:#4dabf7'>{az:+8.2f}</span> <span style='color:#888'>m/s²</span>")
 
     def update_velocity(self, vx, vy, vz):
         """更新显示的速度 (m/s)。"""
-        self.vel_label.setText(f"VEL: {vx:+8.3f} {vy:+8.3f} {vz:+8.3f} m/s")
+        self.vel_val_label.setText(f"<span style='color:#ff6b6b'>{vx:+8.3f}</span> <span style='color:#69db7c'>{vy:+8.3f}</span> <span style='color:#4dabf7'>{vz:+8.3f}</span> <span style='color:#888'>m/s</span>")
 
     def update_altitude(self, pressure=None, altitude=None):
         """
@@ -81,14 +109,14 @@ class SensorInfoOverlay(QWidget):
             if self._ref_altitude is None:
                 self._ref_altitude = altitude
             delta = altitude - self._ref_altitude
-            self.alt_label.setText(f"\u0394Alt: {delta:+8.2f} m  ({altitude:.1f} m)")
+            self.alt_val_label.setText(f"<span style='color:#fcc419'>{delta:+8.2f}</span> <span style='color:#888'>m  ({altitude:.1f} m)</span>")
             return
 
         if pressure is not None and pressure > 0:
             if self._ref_pressure is None:
                 self._ref_pressure = pressure
             h_now = 44330.0 * (1.0 - math.pow(pressure / self._ref_pressure, 1.0 / 5.255))
-            self.alt_label.setText(f"\u0394Alt: {h_now:+8.2f} m  (P={pressure:.0f} Pa)")
+            self.alt_val_label.setText(f"<span style='color:#fcc419'>{h_now:+8.2f}</span> <span style='color:#888'>m  (P={pressure:.0f} Pa)</span>")
 
     # 让鼠标事件穿透
     def mousePressEvent(self, ev):

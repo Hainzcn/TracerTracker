@@ -3,9 +3,10 @@ import time
 
 from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QLabel, QHBoxLayout, QSizePolicy,
-    QTextEdit, QCheckBox, QSpinBox, QSplitter, QPushButton, QComboBox, QFrame,
+    QTextEdit, QCheckBox, QSpinBox, QSplitter, QPushButton, QComboBox,
+    QStyledItemDelegate,
 )
-from PySide6.QtCore import QTimer, Qt, QEvent
+from PySide6.QtCore import QTimer, Qt, QEvent, QSize
 from PySide6.QtGui import QTextCursor
 import serial.tools.list_ports
 from src.ui.viewer_3d import Viewer3D
@@ -16,6 +17,43 @@ from src.utils.data_receiver import DataReceiver
 from src.utils.pose_processor import PoseProcessor
 
 logger = logging.getLogger(__name__)
+
+
+class _CompactItemDelegate(QStyledItemDelegate):
+    """Item delegate that enforces a fixed row height in combo box dropdowns."""
+
+    def __init__(self, height=20, parent=None):
+        super().__init__(parent)
+        self._height = height
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        size.setHeight(self._height)
+        return size
+
+
+class _SeamlessComboBox(QComboBox):
+    """QComboBox whose popup tucks under the rounded bottom corners.
+
+    The combo box keeps its full border-radius at all times.  When the
+    popup opens it is shifted upward by ``_radius`` pixels so its top
+    hides behind the combo box.  The popup window uses
+    ``WA_TranslucentBackground``, so the overlap zone is transparent and
+    the combo box's curved bottom corners show through, giving a flush,
+    one-piece appearance.
+    """
+
+    _radius = 4  # must match the QComboBox border-radius in QSS
+
+    def showPopup(self):
+        super().showPopup()
+        popup = self.view().window()
+        geo = popup.geometry()
+        geo.setTop(geo.top() - self._radius)
+        popup.setGeometry(geo)
+        if popup.layout():
+            popup.layout().setContentsMargins(0, self._radius, 0, 0)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -78,15 +116,17 @@ class MainWindow(QMainWindow):
             QTextEdit {
                 background-color: #1e1e1e;
                 color: #d4d4d4;
-                border: 1px solid #333;
-                font-family: Consolas, monospace;
-                font-size: 11px;
+                border: 1px solid #333333;
+                font-family: 'Consolas', 'JetBrains Mono', monospace;
+                font-size: 12px;
+                padding: 4px;
             }
         """
         
         # 左侧控制台：原始数据
         self.raw_data_console = QTextEdit()
         self.raw_data_console.setReadOnly(True)
+        self.raw_data_console.document().setMaximumBlockCount(500)
         self.raw_data_console.setPlaceholderText("原始数据日志...")
         self.raw_data_console.setStyleSheet(console_style)
 
@@ -119,6 +159,7 @@ class MainWindow(QMainWindow):
         # 右侧控制台：调试信息
         self.debug_info_console = QTextEdit()
         self.debug_info_console.setReadOnly(True)
+        self.debug_info_console.document().setMaximumBlockCount(500)
         self.debug_info_console.setPlaceholderText("调试信息与姿态处理日志...")
         self.debug_info_console.setStyleSheet(console_style)
         
@@ -133,19 +174,19 @@ class MainWindow(QMainWindow):
         self.status_bar_widget = QWidget()
         self.status_bar_layout = QHBoxLayout(self.status_bar_widget)
         self.status_bar_layout.setContentsMargins(10, 0, 10, 0)
-        self.status_bar_widget.setStyleSheet("background-color: #252526; border-top: 1px solid #333;")
-        self.status_bar_widget.setFixedHeight(32)
+        self.status_bar_widget.setStyleSheet("background-color: #252526; border-top: 1px solid #333333;")
+        self.status_bar_widget.setFixedHeight(28)
 
-        self._status_label_style = "color: #999; font-size: 12px; border: none;"
+        self._status_label_style = "color: #999999; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif; border: none;"
+        self._status_label_active_style = "color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif; border: none;"
 
-        self.udp_status_label = QLabel("UDP: Idle")
+        self.udp_status_label = QLabel("⚪ UDP: Idle")
         self.udp_status_label.setStyleSheet(self._status_label_style)
-        self.serial_status_label = QLabel("Serial: Idle")
+        self.serial_status_label = QLabel("⚪ Serial: Idle")
         self.serial_status_label.setStyleSheet(self._status_label_style)
-        self._status_label_active_style = "color: #4CAF50; font-size: 12px; border: none;"
 
         self.status_bar_layout.addWidget(self.udp_status_label)
-        self.status_bar_layout.addSpacing(20)
+        self.status_bar_layout.addSpacing(24)
         self.status_bar_layout.addWidget(self.serial_status_label)
         self.status_bar_layout.addStretch()
 
@@ -157,25 +198,25 @@ class MainWindow(QMainWindow):
         self.full_path_checkbox = QCheckBox("全路径")
         self.full_path_checkbox.setStyleSheet(self._style_checkbox)
         self.full_path_checkbox.toggled.connect(self.toggle_full_path_mode)
-        self.status_bar_layout.addSpacing(12)
+        self.status_bar_layout.addSpacing(16)
         self.status_bar_layout.addWidget(self.full_path_checkbox)
 
         self.trail_checkbox = QCheckBox("速度尾迹")
         self.trail_checkbox.setStyleSheet(self._style_checkbox)
         self.trail_checkbox.toggled.connect(self.toggle_trail_mode)
-        self.status_bar_layout.addSpacing(8)
+        self.status_bar_layout.addSpacing(16)
         self.status_bar_layout.addWidget(self.trail_checkbox)
 
         self.trail_length_label = QLabel("长度")
-        self.trail_length_label.setStyleSheet("color: #555; font-size: 12px; border: none;")
-        self.status_bar_layout.addSpacing(4)
+        self.trail_length_label.setStyleSheet("color: #666666; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif; border: none;")
+        self.status_bar_layout.addSpacing(8)
         self.status_bar_layout.addWidget(self.trail_length_label)
 
         self.trail_length_spinbox = QSpinBox()
         self.trail_length_spinbox.setRange(10, 5000)
         self.trail_length_spinbox.setValue(120)
         self.trail_length_spinbox.setFixedWidth(72)
-        self.trail_length_spinbox.setFixedHeight(20)
+        self.trail_length_spinbox.setFixedHeight(22)
         self.trail_length_spinbox.setStyleSheet(self._style_spinbox)
         self.trail_length_spinbox.valueChanged.connect(self.on_trail_length_changed)
         self.status_bar_layout.addWidget(self.trail_length_spinbox)
@@ -188,6 +229,36 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #1e1e1e;
+                font-family: 'Microsoft YaHei', sans-serif;
+            }
+            QSplitter::handle {
+                background-color: #333333;
+            }
+            QSplitter::handle:horizontal {
+                width: 2px;
+            }
+            QSplitter::handle:vertical {
+                height: 2px;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #1e1e1e;
+                width: 10px;
+                margin: 0px 0px 0px 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #424242;
+                min-height: 20px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #4f4f4f;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
             }
         """)
         
@@ -205,84 +276,119 @@ class MainWindow(QMainWindow):
 
     def _init_bar_styles(self):
         """Define unified style constants shared by top bar and bottom bar."""
-        self._style_label = "color: #999; font-size: 12px; border: none;"
+        self._style_label = "color: #cccccc; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif; border: none;"
         self._style_combo = """
             QComboBox {
-                color: #ccc; font-size: 12px;
-                background: transparent;
-                border: 1px solid #444; border-radius: 4px;
-                padding: 2px 22px 2px 8px; min-width: 120px;
+                color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
+                background: #333333;
+                border: 1px solid #4d4d4d; border-radius: 4px;
+                padding: 2px 20px 2px 8px; min-width: 120px;
             }
-            QComboBox:disabled { color: #555; border-color: #333; }
+            QComboBox:hover { border-color: #666666; background: #3a3a3a; }
+            QComboBox:disabled { color: #666666; border-color: #333333; background: #2a2a2a; }
             QComboBox::drop-down {
                 subcontrol-origin: padding;
                 subcontrol-position: center right;
-                width: 18px; border: none;
+                width: 20px; border: none;
+                background: transparent;
             }
             QComboBox::down-arrow {
                 image: none;
+                width: 0px; 
+                height: 0px;
                 border-left: 4px solid transparent;
                 border-right: 4px solid transparent;
-                border-top: 5px solid #999;
-                width: 0; height: 0;
-                margin-right: 4px;
+                border-top: 5px solid #999999;
+                margin-right: 6px;
+                margin-top: 2px;
+            }
+            QComboBox::down-arrow:on {
+                border-top: none;
+                border-bottom: 5px solid #999999;
+                margin-top: -2px;
             }
             QComboBox QAbstractItemView {
-                color: #ccc; background-color: #2d2d2d;
+                color: #e0e0e0; background-color: #333333;
                 selection-background-color: #094771;
-                font-size: 12px;
-                border: none; outline: none;
+                font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
+                border: 1px solid #4d4d4d;
+                border-top: none;
+                border-bottom-left-radius: 4px;
+                border-bottom-right-radius: 4px;
+                border-top-left-radius: 0px;
+                border-top-right-radius: 0px;
+                outline: none;
+                margin: 0px;
+                padding: 0px;
+            }
+            QComboBox QAbstractItemView::item {
+                min-height: 20px;
+                padding: 0px 8px;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #404040;
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background-color: #094771;
+            }
+            QComboBox QAbstractItemView::item:selected:hover {
+                background-color: #094771;
             }
         """
         self._style_spinbox = """
             QSpinBox {
-                color: #ccc; font-size: 12px;
-                background: transparent;
-                border: 1px solid #444; border-radius: 4px;
-                padding: 2px 8px;
+                color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
+                background: #333333;
+                border: 1px solid #4d4d4d; border-radius: 4px;
+                padding: 2px 6px;
             }
-            QSpinBox:disabled { color: #555; border-color: #333; }
+            QSpinBox:hover { border-color: #666666; background: #3a3a3a; }
+            QSpinBox:disabled { color: #666666; border-color: #333333; background: #2a2a2a; }
             QSpinBox::up-button, QSpinBox::down-button {
                 width: 0; height: 0; border: none;
             }
         """
         self._style_btn_idle = """
             QPushButton {
-                color: #ccc; font-size: 12px;
-                background: transparent;
-                border: 1px solid #444; border-radius: 4px;
-                padding: 2px 12px;
+                color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
+                background: #333333;
+                border: 1px solid #4d4d4d; border-radius: 4px;
+                padding: 2px 10px;
             }
-            QPushButton:hover { background-color: #3a3a3a; }
-            QPushButton:disabled { color: #555; border-color: #333; }
+            QPushButton:hover { background-color: #404040; border-color: #666666; }
+            QPushButton:pressed { background-color: #2a2a2a; border-color: #4d4d4d; }
+            QPushButton:disabled { color: #666666; border-color: #333333; background: #2a2a2a; }
         """
         self._style_btn_active = """
             QPushButton {
-                color: #fff; font-size: 12px;
-                background-color: #388E3C;
-                border: 1px solid #4CAF50; border-radius: 4px;
-                padding: 2px 12px;
+                color: #ffffff; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
+                background-color: #2e7d32;
+                border: 1px solid #4caf50; border-radius: 4px;
+                padding: 2px 10px;
             }
-            QPushButton:hover { background-color: #43A047; }
+            QPushButton:hover { background-color: #388e3c; }
+            QPushButton:pressed { background-color: #1b5e20; }
         """
         self._style_checkbox = """
             QCheckBox {
-                color: #999; font-size: 12px; spacing: 4px;
+                color: #cccccc; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif; spacing: 6px;
             }
-            QCheckBox:disabled { color: #555; }
+            QCheckBox:hover { color: #e0e0e0; }
+            QCheckBox:disabled { color: #666666; }
             QCheckBox::indicator {
-                width: 13px; height: 13px;
-                border: 1px solid #444; border-radius: 2px;
-                background: transparent;
+                width: 14px; height: 14px;
+                border: 1px solid #666666; border-radius: 3px;
+                background: #333333;
             }
+            QCheckBox::indicator:hover { border-color: #888888; }
             QCheckBox::indicator:checked {
-                background: #4CAF50; border-color: #4CAF50;
+                background: #4caf50; border-color: #4caf50;
             }
             QCheckBox::indicator:disabled {
-                border-color: #333; background: transparent;
+                border-color: #4d4d4d; background: #2a2a2a;
             }
             QCheckBox::indicator:checked:disabled {
-                background: #555; border-color: #555;
+                background: #555555; border-color: #555555;
             }
         """
 
@@ -294,11 +400,11 @@ class MainWindow(QMainWindow):
         self.top_bar_widget = QWidget()
         self.top_bar_widget.setFixedHeight(32)
         self.top_bar_widget.setStyleSheet(
-            "background-color: #252526; border-bottom: 1px solid #333;"
+            "background-color: #252526; border-bottom: 1px solid #333333;"
         )
         top_layout = QHBoxLayout(self.top_bar_widget)
         top_layout.setContentsMargins(10, 0, 10, 0)
-        top_layout.setSpacing(6)
+        top_layout.setSpacing(8)
 
         ctrl_h = 24
 
@@ -307,18 +413,27 @@ class MainWindow(QMainWindow):
         serial_label.setStyleSheet(self._style_label)
         top_layout.addWidget(serial_label)
 
-        self.serial_combo = QComboBox()
+        self.serial_combo = _SeamlessComboBox()
         self.serial_combo.setFixedHeight(ctrl_h)
         self.serial_combo.setStyleSheet(self._style_combo)
-        self.serial_combo.view().window().setWindowFlags(
+        self.serial_combo.setItemDelegate(_CompactItemDelegate(20, self.serial_combo))
+        
+        popup_window = self.serial_combo.view().window()
+        popup_window.setWindowFlags(
             Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint
         )
+        popup_window.setAttribute(Qt.WA_TranslucentBackground)
+        from PySide6.QtWidgets import QAbstractItemView
+        self.serial_combo.view().setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.serial_combo.view().setContentsMargins(0, 0, 0, 0)
+        self.serial_combo.view().setSpacing(0)
+        
         self._refresh_serial_ports()
         top_layout.addWidget(self.serial_combo)
 
-        self.serial_refresh_btn = QPushButton("⟳")
+        self.serial_refresh_btn = QPushButton("↻")
         self.serial_refresh_btn.setFixedSize(ctrl_h, ctrl_h)
-        self.serial_refresh_btn.setStyleSheet(self._style_btn_idle)
+        self.serial_refresh_btn.setStyleSheet(self._style_btn_idle + "QPushButton { font-size: 14px; font-weight: bold; padding: 0px; }")
         self.serial_refresh_btn.setToolTip("刷新串口列表")
         self.serial_refresh_btn.clicked.connect(self._refresh_serial_ports)
         top_layout.addWidget(self.serial_refresh_btn)
@@ -329,16 +444,12 @@ class MainWindow(QMainWindow):
         self.serial_toggle_btn.clicked.connect(self._toggle_serial)
         top_layout.addWidget(self.serial_toggle_btn)
 
-        # ── Separator ──
-        sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
-        sep.setStyleSheet("color: #444; border: none;")
-        top_layout.addWidget(sep)
+        top_layout.addSpacing(16)
 
         # ── UDP section ──
-        udp_label = QLabel("UDP端口:")
-        udp_label.setStyleSheet(self._style_label)
-        top_layout.addWidget(udp_label)
+        udp_port_label = QLabel("UDP端口:")
+        udp_port_label.setStyleSheet(self._style_label)
+        top_layout.addWidget(udp_port_label)
 
         udp_config = self.config_loader.get_udp_config()
         self.udp_port_spin = QSpinBox()
@@ -464,17 +575,18 @@ class MainWindow(QMainWindow):
         """
         parts = []
         if linear_acc is not None:
-            parts.append(f"LinACC(X:{linear_acc[0]:.2f}, Y:{linear_acc[1]:.2f}, Z:{linear_acc[2]:.2f})")
+            parts.append(f"LinACC(X:{linear_acc[0]:+6.2f}, Y:{linear_acc[1]:+6.2f}, Z:{linear_acc[2]:+6.2f})")
         else:
-            parts.append("LinACC: N/A")
+            parts.append(f"{'LinACC: N/A':<38}")
             
         if gyr is not None:
-            parts.append(f"GYR(X:{gyr[0]:.2f}, Y:{gyr[1]:.2f}, Z:{gyr[2]:.2f})")
+            parts.append(f"GYR(X:{gyr[0]:+7.2f}, Y:{gyr[1]:+7.2f}, Z:{gyr[2]:+7.2f})")
             
         if mag is not None:
-            parts.append(f"MAG(X:{mag[0]:.2f}, Y:{mag[1]:.2f}, Z:{mag[2]:.2f})")
+            parts.append(f"MAG(X:{mag[0]:+7.2f}, Y:{mag[1]:+7.2f}, Z:{mag[2]:+7.2f})")
             
-        return " | ".join(parts)
+        # 使用不间断空格替换普通空格，确保 HTML 渲染时对齐
+        return " | ".join(parts).replace(" ", "&nbsp;")
 
     def on_pose_updated(self, name, x, y, z):
         """处理来自 PoseProcessor 的位置更新。"""
@@ -489,19 +601,30 @@ class MainWindow(QMainWindow):
     def on_pose_log(self, message):
         """处理来自 PoseProcessor 的日志消息。"""
         if self.debug_splitter.isVisible():
-            self.debug_info_console.moveCursor(QTextCursor.End)
-            self.debug_info_console.insertPlainText(message + "\n")
-            self.debug_info_console.moveCursor(QTextCursor.End)
+            # 简单的高亮处理
+            color = "#d4d4d4"
+            if "stationary detected" in message.lower():
+                color = "#fcc419" # Yellow
+            elif "error" in message.lower() or "failed" in message.lower():
+                color = "#ff6b6b" # Red
+                
+            html_msg = f"<span style='color:{color}'>{message}</span>"
+            self.debug_info_console.append(html_msg)
 
     def on_raw_data_received(self, source, raw_text):
         """处理原始数据日志。"""
         if self.debug_splitter.isVisible() and not self.show_parsed_data:
             timestamp = time.strftime("%H:%M:%S", time.localtime(time.time()))
-            log_msg = f"[{timestamp}] [{source.upper()}] {raw_text}"
             
-            self.raw_data_console.moveCursor(QTextCursor.End)
-            self.raw_data_console.insertPlainText(log_msg + "\n")
-            self.raw_data_console.moveCursor(QTextCursor.End)
+            source_color = "#4dabf7" if source == "udp" else "#69db7c"
+            
+            html_msg = (
+                f"<span style='color:#888888'>[{timestamp}]</span> "
+                f"<span style='color:{source_color}; font-weight:bold'>[{source.upper()}]</span> "
+                f"<span style='color:#d4d4d4'>{raw_text}</span>"
+            )
+            
+            self.raw_data_console.append(html_msg)
 
     def on_parsed_data_updated(self, source, prefix, linear_acc, gyr, mag):
         """处理解析后的数据更新，用于叠加层和解析视图日志。"""
@@ -513,11 +636,17 @@ class MainWindow(QMainWindow):
         if self.debug_splitter.isVisible() and self.show_parsed_data:
             timestamp = time.strftime("%H:%M:%S", time.localtime(time.time()))
             parsed_str = self.format_parsed_data(prefix, linear_acc, gyr, mag)
-            log_msg = f"[{timestamp}] [{source.upper()}] [PARSED] {parsed_str}"
             
-            self.raw_data_console.moveCursor(QTextCursor.End)
-            self.raw_data_console.insertPlainText(log_msg + "\n")
-            self.raw_data_console.moveCursor(QTextCursor.End)
+            source_color = "#4dabf7" if source == "udp" else "#69db7c"
+            
+            html_msg = (
+                f"<span style='color:#888888'>[{timestamp}]</span> "
+                f"<span style='color:{source_color}; font-weight:bold'>[{source.upper()}]</span> "
+                f"<span style='color:#fcc419; font-weight:bold'>[PARSED]</span> "
+                f"<span style='color:#e0e0e0'>{parsed_str}</span>"
+            )
+            
+            self.raw_data_console.append(html_msg)
 
     def _update_overlays(self, data):
         """根据数据快照更新传感器叠加部件。"""
@@ -563,11 +692,11 @@ class MainWindow(QMainWindow):
             
         if source == "udp":
             self.last_udp_time = current_time
-            self.udp_status_label.setText(f"UDP: {status_text}")
+            self.udp_status_label.setText(f"🟢 UDP: {status_text}")
             self.udp_status_label.setStyleSheet(self._status_label_active_style)
         elif source == "serial":
             self.last_serial_time = current_time
-            self.serial_status_label.setText(f"Serial: {status_text}")
+            self.serial_status_label.setText(f"🟢 Serial: {status_text}")
             self.serial_status_label.setStyleSheet(self._status_label_active_style)
         
         points_config = self.config_loader.get("points", [])
@@ -629,11 +758,11 @@ class MainWindow(QMainWindow):
         timeout = 2.0 # 秒
         
         if current_time - self.last_udp_time > timeout:
-            self.udp_status_label.setText("UDP: Idle")
+            self.udp_status_label.setText("⚪ UDP: Idle")
             self.udp_status_label.setStyleSheet(self._status_label_style)
 
         if current_time - self.last_serial_time > timeout:
-            self.serial_status_label.setText("Serial: Idle")
+            self.serial_status_label.setText("⚪ Serial: Idle")
             self.serial_status_label.setStyleSheet(self._status_label_style)
 
     def eventFilter(self, obj, event):
