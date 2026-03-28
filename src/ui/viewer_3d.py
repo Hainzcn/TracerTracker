@@ -261,15 +261,33 @@ class Viewer3D(gl.GLViewWidget):
             else:
                 alpha_mult = 1.0
 
-            c = base_rgba.copy()
-            c[3] *= alpha_mult
+            c_max = base_rgba.copy()
+            c_max[3] *= alpha_mult
 
-            verts.append([-half_extent, coord, 0.0])
-            verts.append([ half_extent, coord, 0.0])
-            colors.append(c); colors.append(c)
-            verts.append([coord, -half_extent, 0.0])
-            verts.append([coord,  half_extent, 0.0])
-            colors.append(c); colors.append(c)
+            if do_fade:
+                c_zero = c_max.copy()
+                c_zero[3] = 0.0
+                
+                # 平行于 X 轴的线 (y = coord)
+                verts.extend([[-half_extent, coord, 0.0], [-fade_radius, coord, 0.0]])
+                colors.extend([c_zero, c_max])
+                verts.extend([[-fade_radius, coord, 0.0], [fade_radius, coord, 0.0]])
+                colors.extend([c_max, c_max])
+                verts.extend([[fade_radius, coord, 0.0], [half_extent, coord, 0.0]])
+                colors.extend([c_max, c_zero])
+
+                # 平行于 Y 轴的线 (x = coord)
+                verts.extend([[coord, -half_extent, 0.0], [coord, -fade_radius, 0.0]])
+                colors.extend([c_zero, c_max])
+                verts.extend([[coord, -fade_radius, 0.0], [coord, fade_radius, 0.0]])
+                colors.extend([c_max, c_max])
+                verts.extend([[coord, fade_radius, 0.0], [coord, half_extent, 0.0]])
+                colors.extend([c_max, c_zero])
+            else:
+                verts.extend([[-half_extent, coord, 0.0], [half_extent, coord, 0.0]])
+                colors.extend([c_max, c_max])
+                verts.extend([[coord, -half_extent, 0.0], [coord, half_extent, 0.0]])
+                colors.extend([c_max, c_max])
 
         if not verts:
             return empty_pos, empty_col
@@ -345,7 +363,7 @@ class Viewer3D(gl.GLViewWidget):
         minor_width = self.GRID_MINOR_WIDTH_MIN + (self.GRID_MAJOR_WIDTH - self.GRID_MINOR_WIDTH_MIN) * fade ** 2.0
 
         # --- 网格（XOY 平面）---
-        half_extent_raw = max(pos_ext * 4, 40)
+        half_extent_raw = max(pos_ext * 4, 1e-3)
         half_extent = math.ceil(half_extent_raw / max(major_sp, 1e-15)) * major_sp
         grid_fade_radius = pos_ext * 1.2
 
