@@ -16,6 +16,7 @@ class ViewOrientationGizmo(QWidget):
     _AXIS_LENGTH = 0.65
     _BASE_RADIUS = 7
     _CENTER_RADIUS = 0
+    _BG_RADIUS_RATIO = 0.85
 
     _AXES = [
         {
@@ -53,6 +54,9 @@ class ViewOrientationGizmo(QWidget):
 
         self._label_font = QFont("Arial", 10, QFont.Bold)
         self._hovered_key = None
+        self._hovering_bg = False
+        self._pressed_preset = None
+        self._last_mouse_pos = None
         self.setMouseTracking(True)
 
     def update_orientation(self):
@@ -134,6 +138,14 @@ class ViewOrientationGizmo(QWidget):
 
         cx = self._SIZE / 2.0
         cy = self._SIZE / 2.0
+        
+        # Draw circular background if hovering
+        if self._hovering_bg:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(128, 128, 128, 60)))
+            bg_radius = cx * self._BG_RADIUS_RATIO
+            painter.drawEllipse(QPointF(cx, cy), bg_radius, bg_radius)
+
         endpoints = self._build_endpoints()
 
         # Draw lines only for positive axes
@@ -148,6 +160,14 @@ class ViewOrientationGizmo(QWidget):
         for ep in endpoints:
             r = ep['radius']
             color = QColor(ep['color'])
+            
+            # Reduce saturation and value based on depth to improve spatial feel
+            depth = ep['depth']
+            if depth < 0:
+                h, s, v, a = color.getHsv()
+                # depth is typically between -1 and 1 roughly
+                factor = max(0.3, 1.0 + depth * 0.4)
+                color.setHsv(h, int(s * factor), int(v * factor), a)
 
             is_hovered = (ep['key'] == self._hovered_key)
             if is_hovered:
@@ -169,7 +189,11 @@ class ViewOrientationGizmo(QWidget):
                     font.setPointSizeF(max(1.0, base_size * ep['scale']))
                     painter.setFont(font)
                     
-                    painter.setPen(QColor(20, 20, 20)) # Dark text like Blender
+                    if is_hovered:
+                        painter.setPen(QColor(255, 255, 255)) # White text when hovered
+                    else:
+                        painter.setPen(QColor(20, 20, 20)) # Dark text like Blender
+                        
                     text_rect = painter.fontMetrics().boundingRect(ep['label'])
                     painter.drawText(
                         QPointF(ep['x'] - text_rect.width() / 2.0,
@@ -202,9 +226,97 @@ class ViewOrientationGizmo(QWidget):
 
     def mousePressEvent(self, ev):
         if ev.button() == Qt.LeftButton:
-            key, preset = self._hit_test(ev.position())
-            if preset is not None:
-                elev, azim = preset
+            pos = ev.position()
+            cx = self._SIZE / 2.0
+            cy = self._SIZE / 2.0
+            dx = pos.x() - cx
+            dy = pos.y() - cy
+            
+            # Check if click is inside the circular area
+            bg_radius = (self._SIZE / 2.0) * self._BG_RADIUS_RATIO
+            if dx * dx + dy * dy <= bg_radius ** 2:
+                key, preset = self._hit_test(pos)
+                self._pressed_preset = preset
+                self._last_mouse_pos = pos
+                ev.accept()
+                return
+        ev.ignore()
+
+    def mouseMoveEvent(self, ev):
+        pos = ev.position()
+        cx = self._SIZE / 2.0
+        cy = self._SIZE / 2.0
+        dx = pos.x() - cx
+        dy = pos.y() - cy
+        
+        bg_radius = (self._SIZE / 2.0) * self._BG_RADIUS_RATIO
+        is_inside = (dx * dx + dy * dy <= bg_radius ** 2)
+        needs_update = False
+        
+        if is_inside != self._hovering_bg:
+            self._hovering_bg = is_inside
+            needs_update = True
+
+        if ev.buttons() == Qt.LeftButton and self._last_mouse_pos is not None:
+            # Drag to rotate
+            diff = pos - self._last_mouse_pos
+            self.viewer.orbit(diff.x(), diff.y())
+            self.viewer._update_arrow_billboard()
+            self.viewer.camera_changed.emit()
+            self.viewer.update()
+            
+            self._last_mouse_pos = pos
+            self.update_orientation()
+            
+            # If dragging, we might have moved off the initial preset
+            # We could clear it here if drag distance is significant, 
+            # but standard behavior often just cancels click if dragged.
+            # For simplicity, we'll let release event handle it (if dragged, release might still be inside, but we can clear preset to avoid snapping after drag)
+            if diff.manhattanLength() > 2:
+                self._pressed_preset = None
+                
+            ev.accept()
+            return
+            
+        # Hover logic
+        key, _ = self._hit_test(pos)
+        if key != self._hovered_key:
+            self._hovered_key = key
+            self.setCursor(Qt.PointingHandCursor if key else Qt.ArrowCursor)
+            needs_update = True
+            
+        if needs_update:
+            self.update()
+            
+        ev.ignore()
+
+    def leaveEvent(self, _ev):
+        needs_update = False
+        if self._hovered_key is not None:
+            self._hovered_key = None
+            self.setCursor(Qt.ArrowCursor)
+            needs_update = True
+            
+        if self._hovering_bg:
+            self._hovering_bg = False
+            needs_update = True
+            
+        if needs_update:
+            self.update()
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.LeftButton and self._last_mouse_pos is not None:
+            pos = ev.position()
+            cx = self._SIZE / 2.0
+            cy = self._SIZE / 2.0
+            dx = pos.x() - cx
+            dy = pos.y() - cy
+            
+            bg_radius = (self._SIZE / 2.0) * self._BG_RADIUS_RATIO
+            is_inside = (dx * dx + dy * dy <= bg_radius ** 2)
+            
+            if is_inside and self._pressed_preset is not None:
+                elev, azim = self._pressed_preset
                 if azim is None:
                     azim = self._azimuth
                 
@@ -219,10 +331,10 @@ class ViewOrientationGizmo(QWidget):
                     # We are already at the target view, so flip to the opposite
                     opposite_preset = None
                     for axis in self._AXES:
-                        if axis['preset_pos'] == preset:
+                        if axis['preset_pos'] == self._pressed_preset:
                             opposite_preset = axis['preset_neg']
                             break
-                        elif axis['preset_neg'] == preset:
+                        elif axis['preset_neg'] == self._pressed_preset:
                             opposite_preset = axis['preset_pos']
                             break
                     
@@ -232,25 +344,12 @@ class ViewOrientationGizmo(QWidget):
                             azim = target_azim
 
                 self.view_selected.emit(float(elev), float(azim))
-                ev.accept()
-                return
-        ev.ignore()
-
-    def mouseMoveEvent(self, ev):
-        key, _ = self._hit_test(ev.position())
-        if key != self._hovered_key:
-            self._hovered_key = key
-            self.setCursor(Qt.PointingHandCursor if key else Qt.ArrowCursor)
-            self.update()
-        ev.ignore()
-
-    def leaveEvent(self, _ev):
-        if self._hovered_key is not None:
-            self._hovered_key = None
-            self.setCursor(Qt.ArrowCursor)
-            self.update()
-
-    def mouseReleaseEvent(self, ev):
+                
+            self._pressed_preset = None
+            self._last_mouse_pos = None
+            ev.accept()
+            return
+            
         ev.ignore()
 
     def wheelEvent(self, ev):
