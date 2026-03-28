@@ -46,18 +46,22 @@ class Viewer3D(gl.GLViewWidget):
 
         # 坐标系视觉参数（必须在 add_custom_axes 之前设置）
         self.AXIS_VISUAL_RATIO = 0.28
-        self.TICK_LABEL_POOL_SIZE = 30
+        self.TICK_LABEL_POOL_SIZE = 60
         self.TICK_LINE_LENGTH_RATIO = 0.02
         self.scene_scale = self.initial_state['scene_scale']
         
-        # 双层 XOY 网格：主网格对齐刻度，副网格细分
-        self.grid_major = gl.GLGridItem()
-        self.grid_major.setColor((0, 255, 255, 40))
-        self.addItem(self.grid_major)
+        # 双层 XOY 网格：主网格（粗线）和副网格（细线），一级 = 5× 二级
+        self.GRID_MAJOR_WIDTH = 1.6
+        self.GRID_MINOR_WIDTH_MIN = 0.5
+        self.GRID_MAJOR_ALPHA = 40
 
-        self.grid_minor = gl.GLGridItem()
-        self.grid_minor.setColor((0, 255, 255, 20))
-        self.addItem(self.grid_minor)
+        self.grid_major_item = gl.GLLinePlotItem(mode='lines', width=self.GRID_MAJOR_WIDTH, antialias=True)
+        self.grid_major_item.setGLOptions('translucent')
+        self.addItem(self.grid_major_item)
+
+        self.grid_minor_item = gl.GLLinePlotItem(mode='lines', width=self.GRID_MINOR_WIDTH_MIN, antialias=True)
+        self.grid_minor_item.setGLOptions('translucent')
+        self.addItem(self.grid_minor_item)
         
         # 添加加粗加长的自定义坐标轴
         self.add_custom_axes()
@@ -193,37 +197,54 @@ class Viewer3D(gl.GLViewWidget):
             return
         item.setVisible(False)
 
+    _LOG5 = math.log(5.0)
+
     @staticmethod
-    def _compute_nice_interval(range_val, target_ticks=6):
-        """Return (interval, nice, phase_t).
+    def _compute_grid_spacings(view_range, target_minor_count=15):
+        """Compute two-level grid spacings using a pure x5 level sequence.
 
-        nice    -- multiplier within the decade (1, 2, or 5).
-        phase_t -- continuous 0..1 within the current nice band.
-                   0 = densest (just entered band), 1 = sparsest (about to exit).
+        The minor spacing follows ..., 0.04, 0.2, 1, 5, 25, 125, ...
+        Major spacing is always 5x minor, guaranteeing that at level
+        transitions old minor lines become new major lines seamlessly.
+
+        Returns (minor_spacing, major_spacing, phase_t) where phase_t
+        in [0, 1] drives the minor-grid fade animation:
+          phase_t near 1 -> just entered level (dense), minor faint
+          phase_t near 0 -> about to exit level (sparse), minor prominent
         """
-        if range_val <= 0:
-            return 1.0, 1, 0.0
-        raw = range_val / target_ticks
-        exponent = math.floor(math.log10(max(raw, 1e-15)))
-        base = 10 ** exponent
-        fraction = raw / base
-        log_frac = math.log10(max(fraction, 1e-15))
+        if view_range <= 0:
+            return 1.0, 5.0, 0.5
+        ideal = view_range / target_minor_count
+        log5_val = math.log(max(ideal, 1e-15)) / Viewer3D._LOG5
+        level = math.floor(log5_val)
+        minor = 5.0 ** level
+        major = 5.0 * minor
+        phase = log5_val - level
+        return minor, major, max(0.0, min(1.0, phase))
 
-        _LOG_1_5 = 0.17609125905568124
-        _LOG_3_5 = 0.5440680443502757
+    @staticmethod
+    def _build_grid_lines(spacing, half_extent, skip_multiple=0):
+        """Generate line-pair vertices for a grid on the XOY plane (z=0).
 
-        if fraction <= 1.5:
-            nice = 1
-            t = 1.0 - log_frac / _LOG_1_5 if _LOG_1_5 > 0 else 0.0
-        elif fraction <= 3.5:
-            nice = 2
-            t = 1.0 - (log_frac - _LOG_1_5) / (_LOG_3_5 - _LOG_1_5)
-        else:
-            nice = 5
-            t = 1.0 - (log_frac - _LOG_3_5) / (1.0 - _LOG_3_5)
-
-        t = max(0.0, min(1.0, t))
-        return nice * base, nice, t
+        Returns np.ndarray of shape (N, 3) for GLLinePlotItem mode='lines'.
+        If skip_multiple > 0, lines whose index is a multiple of that value
+        are omitted (used by minor grid to avoid overlapping major lines).
+        """
+        if spacing <= 0 or half_extent <= 0:
+            return np.zeros((0, 3), dtype=np.float32)
+        n = int(half_extent / spacing + 0.5)
+        segments = []
+        for i in range(-n, n + 1):
+            if skip_multiple > 0 and i % skip_multiple == 0:
+                continue
+            coord = i * spacing
+            segments.append([-half_extent, coord, 0.0])
+            segments.append([ half_extent, coord, 0.0])
+            segments.append([coord, -half_extent, 0.0])
+            segments.append([coord,  half_extent, 0.0])
+        if not segments:
+            return np.zeros((0, 3), dtype=np.float32)
+        return np.array(segments, dtype=np.float32)
 
     def add_custom_axes(self):
         self.axes_width = 3
@@ -282,29 +303,61 @@ class Viewer3D(gl.GLViewWidget):
         if self.z_label is not None:
             self.z_label.setData(pos=np.array([0, 0, label_offset], dtype=np.float32))
 
-        # --- 刻度计算 ---
+        # --- 网格与刻度计算（一级 = 5× 二级）---
         total_range = pos_ext - neg_ext
-        interval, nice, phase_t = self._compute_nice_interval(total_range, target_ticks=6)
+        minor_sp, major_sp, phase_t = self._compute_grid_spacings(total_range)
         tick_half = axis_length * self.TICK_LINE_LENGTH_RATIO
 
+        # phase_t 在级别内随缩放连续变化（参见 _compute_grid_spacings 注释）。
+        # fade = 1 → 副网格完全可见（即将升级为主网格）
+        # fade = 0 → 副网格不可见（刚刚进入新级别，线太密）
+        fade = max(0.0, min(1.0, 1.0 - phase_t))
+        minor_alpha = int(self.GRID_MAJOR_ALPHA * fade ** 1.5)
+        minor_width = self.GRID_MINOR_WIDTH_MIN + (self.GRID_MAJOR_WIDTH - self.GRID_MINOR_WIDTH_MIN) * fade
+
+        # --- 网格（XOY 平面）---
+        half_extent_raw = max(pos_ext * 2, 20)
+        half_extent = math.ceil(half_extent_raw / max(major_sp, 1e-15)) * major_sp
+
+        major_verts = self._build_grid_lines(major_sp, half_extent)
+        if len(major_verts) >= 2:
+            major_color = np.array([0.0, 1.0, 1.0, self.GRID_MAJOR_ALPHA / 255.0], dtype=np.float32)
+            major_colors = np.tile(major_color, (len(major_verts), 1))
+            self.grid_major_item.setData(pos=major_verts, color=major_colors, mode='lines')
+            self.grid_major_item.setVisible(True)
+        else:
+            self.grid_major_item.setVisible(False)
+
+        if minor_alpha > 0:
+            minor_verts = self._build_grid_lines(minor_sp, half_extent, skip_multiple=5)
+            if len(minor_verts) >= 2:
+                minor_color = np.array([0.0, 1.0, 1.0, minor_alpha / 255.0], dtype=np.float32)
+                minor_colors = np.tile(minor_color, (len(minor_verts), 1))
+                self.grid_minor_item.setData(pos=minor_verts, color=minor_colors, mode='lines',
+                                             width=minor_width)
+                self.grid_minor_item.setVisible(True)
+            else:
+                self.grid_minor_item.setVisible(False)
+        else:
+            self.grid_minor_item.setVisible(False)
+
+        # --- 刻度线与标签（对齐一级网格）---
         tick_verts = []
         tick_colors = []
         label_idx = 0
 
         axis_defs = [
-            # (主轴索引, RGBA 颜色, 两个垂直方向的索引)
-            (0, (1.0, 0.3, 0.3, 0.7), (1, 2)),  # X 轴
-            (1, (0.3, 1.0, 0.3, 0.7), (0, 2)),  # Y 轴
-            (2, (0.3, 0.3, 1.0, 0.7), (0, 1)),  # Z 轴
+            (0, (1.0, 0.3, 0.3, 0.7), (1, 2)),  # X
+            (1, (0.3, 1.0, 0.3, 0.7), (0, 2)),  # Y
+            (2, (0.3, 0.3, 1.0, 0.7), (0, 1)),  # Z
         ]
 
         for main_ax, color, (perp_a, perp_b) in axis_defs:
-            val = interval
+            val = major_sp
             while val <= pos_ext + 1e-9:
                 for sign_val in ([val, -val] if val > 1e-9 else [val]):
                     if sign_val < neg_ext - 1e-9 or sign_val > pos_ext + 1e-9:
                         continue
-                    # 垂直于坐标轴的刻度线（沿 perp_a 方向）
                     p1 = np.zeros(3, dtype=np.float32)
                     p2 = np.zeros(3, dtype=np.float32)
                     p1[main_ax] = sign_val
@@ -316,7 +369,6 @@ class Viewer3D(gl.GLViewWidget):
                     tick_colors.append(color)
                     tick_colors.append(color)
 
-                    # 刻度标签
                     if label_idx < self.TICK_LABEL_POOL_SIZE:
                         lbl = self.tick_label_pool[label_idx]
                         lbl_pos = np.zeros(3, dtype=np.float32)
@@ -334,13 +386,11 @@ class Viewer3D(gl.GLViewWidget):
                         lbl.setData(pos=lbl_pos.astype(float), text=txt)
                         lbl.setVisible(True)
                         label_idx += 1
-                val += interval
+                val += major_sp
 
-        # 隐藏未使用的标签
         for i in range(label_idx, self.TICK_LABEL_POOL_SIZE):
             self.tick_label_pool[i].setVisible(False)
 
-        # 更新刻度几何体
         if len(tick_verts) >= 2:
             self.tick_line_item.setData(
                 pos=np.array(tick_verts, dtype=np.float32),
@@ -349,29 +399,6 @@ class Viewer3D(gl.GLViewWidget):
             self.tick_line_item.setVisible(True)
         else:
             self.tick_line_item.setVisible(False)
-
-        # --- 网格（XOY 平面），对齐刻度间隔 ---
-        half_extent_raw = max(pos_ext * 2, 20)
-        half_extent = math.ceil(half_extent_raw / max(interval, 1e-15)) * interval
-        grid_extent = half_extent * 2
-
-        self.grid_major.setSize(x=grid_extent, y=grid_extent)
-        self.grid_major.setSpacing(x=interval, y=interval)
-
-        # 次级网格间距 = 下一个更细的 nice interval，确保跳变时
-        # 旧次级网格线与新主网格线完全重合，实现无缝交叉淡入淡出。
-        #   nice=1 or 2 → ÷2    nice=5 → ÷2.5
-        minor_spacing = interval / 2.5 if nice == 5 else interval / 2.0
-
-        # phase_t 驱动透明度：0=刚进入(密)→不需要次级；1=即将跳变(疏)→次级全亮
-        # 使用 power curve 使次级网格仅在接近跳变时才显著可见，
-        # 且在跳变瞬间 alpha≈主网格 alpha(40)，"升格"无色差。
-        minor_alpha = int(40 * (phase_t ** 2.0))
-
-        self.grid_minor.setSize(x=grid_extent, y=grid_extent)
-        self.grid_minor.setSpacing(x=minor_spacing, y=minor_spacing)
-        self.grid_minor.setColor((0, 255, 255, max(minor_alpha, 0)))
-        self.grid_minor.setVisible(minor_alpha > 0)
         
     def clear_all(self):
         """Remove all tracked points, paths, trails and associated data."""
