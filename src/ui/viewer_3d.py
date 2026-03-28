@@ -33,6 +33,7 @@ class Viewer3D(gl.GLViewWidget):
             'center': QVector3D(0, 0, 0),
             'pan_x': 0,
             'pan_y': -5,
+            'scene_scale': 1.0,
         }
         
         # 初始化相机与背景
@@ -47,6 +48,7 @@ class Viewer3D(gl.GLViewWidget):
         self.AXIS_VISUAL_RATIO = 0.28
         self.TICK_LABEL_POOL_SIZE = 30
         self.TICK_LINE_LENGTH_RATIO = 0.02
+        self.scene_scale = self.initial_state['scene_scale']
         
         # 双层 XOY 网格：主网格对齐刻度，副网格细分
         self.grid_major = gl.GLGridItem()
@@ -101,6 +103,12 @@ class Viewer3D(gl.GLViewWidget):
         self.animation_duration = 800  # 毫秒
         self.start_state = {}
         self.target_state = {}
+        # 平滑缩放动画
+        self._target_scene_scale = self.scene_scale
+        self._zoom_anim_timer = QTimer(self)
+        self._zoom_anim_timer.setInterval(16)
+        self._zoom_anim_timer.timeout.connect(self._update_zoom_animation)
+
         self.render_debug_enabled = os.getenv("TRACER_RENDER_DEBUG", "0") == "1"
         self.render_debug_verbose_point_updates = os.getenv("TRACER_RENDER_DEBUG_VERBOSE", "0") == "1"
 
@@ -187,18 +195,35 @@ class Viewer3D(gl.GLViewWidget):
 
     @staticmethod
     def _compute_nice_interval(range_val, target_ticks=6):
+        """Return (interval, nice, phase_t).
+
+        nice    -- multiplier within the decade (1, 2, or 5).
+        phase_t -- continuous 0..1 within the current nice band.
+                   0 = densest (just entered band), 1 = sparsest (about to exit).
+        """
         if range_val <= 0:
-            return 1.0
+            return 1.0, 1, 0.0
         raw = range_val / target_ticks
         exponent = math.floor(math.log10(max(raw, 1e-15)))
-        fraction = raw / (10 ** exponent)
+        base = 10 ** exponent
+        fraction = raw / base
+        log_frac = math.log10(max(fraction, 1e-15))
+
+        _LOG_1_5 = 0.17609125905568124
+        _LOG_3_5 = 0.5440680443502757
+
         if fraction <= 1.5:
             nice = 1
+            t = 1.0 - log_frac / _LOG_1_5 if _LOG_1_5 > 0 else 0.0
         elif fraction <= 3.5:
             nice = 2
+            t = 1.0 - (log_frac - _LOG_1_5) / (_LOG_3_5 - _LOG_1_5)
         else:
             nice = 5
-        return nice * (10 ** exponent)
+            t = 1.0 - (log_frac - _LOG_3_5) / (1.0 - _LOG_3_5)
+
+        t = max(0.0, min(1.0, t))
+        return nice * base, nice, t
 
     def add_custom_axes(self):
         self.axes_width = 3
@@ -233,7 +258,7 @@ class Viewer3D(gl.GLViewWidget):
 
     def update_coordinate_system(self):
         dist = self.cameraParams()['distance']
-        axis_length = dist * self.AXIS_VISUAL_RATIO
+        axis_length = dist * self.AXIS_VISUAL_RATIO / self.scene_scale
         neg_ext = -axis_length * 0.5
         pos_ext = axis_length
 
@@ -259,7 +284,7 @@ class Viewer3D(gl.GLViewWidget):
 
         # --- 刻度计算 ---
         total_range = pos_ext - neg_ext
-        interval = self._compute_nice_interval(total_range, target_ticks=6)
+        interval, nice, phase_t = self._compute_nice_interval(total_range, target_ticks=6)
         tick_half = axis_length * self.TICK_LINE_LENGTH_RATIO
 
         tick_verts = []
@@ -326,7 +351,6 @@ class Viewer3D(gl.GLViewWidget):
             self.tick_line_item.setVisible(False)
 
         # --- 网格（XOY 平面），对齐刻度间隔 ---
-        # 将半幅值对齐到刻度间隔的整数倍，使网格线经过原点
         half_extent_raw = max(pos_ext * 2, 20)
         half_extent = math.ceil(half_extent_raw / max(interval, 1e-15)) * interval
         grid_extent = half_extent * 2
@@ -334,15 +358,15 @@ class Viewer3D(gl.GLViewWidget):
         self.grid_major.setSize(x=grid_extent, y=grid_extent)
         self.grid_major.setSpacing(x=interval, y=interval)
 
-        minor_spacing = interval / 5.0
-        raw_interval = total_range / 6.0
-        phase = raw_interval / max(interval, 1e-15)
-        if phase <= 1.0:
-            minor_alpha = 25
-        elif phase < 1.5:
-            minor_alpha = int(25 * (1.0 - (phase - 1.0) / 0.5))
-        else:
-            minor_alpha = 0
+        # 次级网格间距 = 下一个更细的 nice interval，确保跳变时
+        # 旧次级网格线与新主网格线完全重合，实现无缝交叉淡入淡出。
+        #   nice=1 or 2 → ÷2    nice=5 → ÷2.5
+        minor_spacing = interval / 2.5 if nice == 5 else interval / 2.0
+
+        # phase_t 驱动透明度：0=刚进入(密)→不需要次级；1=即将跳变(疏)→次级全亮
+        # 使用 power curve 使次级网格仅在接近跳变时才显著可见，
+        # 且在跳变瞬间 alpha≈主网格 alpha(40)，"升格"无色差。
+        minor_alpha = int(40 * (phase_t ** 2.0))
 
         self.grid_minor.setSize(x=grid_extent, y=grid_extent)
         self.grid_minor.setSpacing(x=minor_spacing, y=minor_spacing)
@@ -389,6 +413,8 @@ class Viewer3D(gl.GLViewWidget):
             if dist > cam_dist * 0.4:
                 new_dist = dist * 2.5
                 self.setCameraPosition(distance=new_dist, elevation=45, azimuth=45)
+                self.scene_scale = self.initial_state['scene_scale']
+                self._target_scene_scale = self.scene_scale
                 self.update_coordinate_system()
 
             self.first_point_rendered = True
@@ -672,6 +698,7 @@ class Viewer3D(gl.GLViewWidget):
             'azimuth': current_cam['azimuth'],
             'pan_x': self.pan_offset.x(),
             'pan_y': self.pan_offset.y(),
+            'scene_scale': self.scene_scale,
         }
 
         self.target_state = {
@@ -680,6 +707,7 @@ class Viewer3D(gl.GLViewWidget):
             'azimuth': current_cam['azimuth'],
             'pan_x': self.initial_state['pan_x'],
             'pan_y': self.initial_state['pan_y'],
+            'scene_scale': self.initial_state['scene_scale'],
         }
 
         self.animation_start_time = QTime.currentTime()
@@ -695,10 +723,8 @@ class Viewer3D(gl.GLViewWidget):
             self.orbit(diff.x(), diff.y())
             
         elif ev.buttons() == Qt.MouseButton.RightButton:
-            # 屏幕空间平移：向下拖动 → 内容向上移动
             dist = self.cameraParams()['distance']
-            # 缩放因子：根据相机距离调整，保持手感一致
-            scale = dist * 0.001
+            scale = dist / self.scene_scale * 0.001
             
             self.pan_offset.setX(self.pan_offset.x() + diff.x() * scale)
             self.pan_offset.setY(self.pan_offset.y() - diff.y() * scale)  # Y 方向反转
@@ -710,57 +736,63 @@ class Viewer3D(gl.GLViewWidget):
 
     def viewMatrix(self):
         """
-        重写视图矩阵以加入自定义平移偏移。
-        旋转始终围绕原点 (0,0,0)，同时允许视图平移。
+        重写视图矩阵以加入自定义平移偏移和场景缩放。
+        旋转始终围绕原点 (0,0,0)，滚轮缩放通过 scene_scale 缩放世界坐标系。
         """
         m = QMatrix4x4()
         
-        # 应用屏幕空间平移
         m.translate(self.pan_offset.x(), self.pan_offset.y(), 0)
-        
-        # 标准 GLViewWidget 视图矩阵：按距离平移（相机缩放）
         m.translate(0, 0, -self.opts['distance'])
-        
-        # 围绕中心旋转
         m.rotate(self.opts['elevation']-90, 1, 0, 0)
         m.rotate(self.opts['azimuth'], 0, 0, 1)
         
-        # 平移到中心点（保持 0,0,0 作为旋转支点）
+        # 场景缩放：缩放整个世界坐标系，而非移动相机
+        s = self.scene_scale
+        m.scale(s, s, s)
+        
         center = self.opts['center']
         m.translate(-center.x(), -center.y(), -center.z())
         
         return m
 
     def wheelEvent(self, ev):
-        """处理滚轮缩放。"""
-        # 用户交互时停止动画
+        """处理滚轮缩放：缩放场景而非移动相机（平滑过渡）。"""
         if self.animation_timer.isActive():
             self.animation_timer.stop()
-            
-        # 计算滚动量
+
         delta = ev.angleDelta().y()
-        
-        # 缩放因子
-        if delta > 0:
-            factor = 0.9
-        else:
-            factor = 1.1
-            
-        # 通过改变相机距离实现缩放
-        cam_params = self.cameraParams()
-        dist = cam_params['distance']
-        self.setCameraPosition(distance=dist * factor)
-        self.update_coordinate_system()
-        
+        factor = 1.1 if delta > 0 else (1.0 / 1.1)
+
+        self._target_scene_scale *= factor
+        if not self._zoom_anim_timer.isActive():
+            self._zoom_anim_timer.start()
         ev.accept()
 
+    def _update_zoom_animation(self):
+        lerp_speed = 0.28
+        diff = self._target_scene_scale - self.scene_scale
+        if abs(diff) / max(self.scene_scale, 1e-9) < 1e-4:
+            self.scene_scale = self._target_scene_scale
+            self._zoom_anim_timer.stop()
+        else:
+            self.scene_scale += diff * lerp_speed
+        self.update_coordinate_system()
+        self.update()
+
     def start_reset_animation(self, full_reset=True):
+        if self._zoom_anim_timer.isActive():
+            self._zoom_anim_timer.stop()
+
         current_params = self.cameraParams()
 
         if full_reset:
             target_distance = self.initial_state['distance']
+            target_scene_scale = self.initial_state['scene_scale']
         else:
             target_distance = current_params['distance']
+            target_scene_scale = self.scene_scale
+
+        self._target_scene_scale = target_scene_scale
 
         current_azim = current_params['azimuth']
         target_azim = self.initial_state['azimuth']
@@ -774,6 +806,7 @@ class Viewer3D(gl.GLViewWidget):
             'azimuth': current_params['azimuth'],
             'pan_x': self.pan_offset.x(),
             'pan_y': self.pan_offset.y(),
+            'scene_scale': self.scene_scale,
         }
 
         self.target_state = {
@@ -782,6 +815,7 @@ class Viewer3D(gl.GLViewWidget):
             'azimuth': effective_target_azim,
             'pan_x': self.initial_state['pan_x'],
             'pan_y': self.initial_state['pan_y'],
+            'scene_scale': target_scene_scale,
         }
 
         self.animation_start_time = QTime.currentTime()
@@ -808,6 +842,11 @@ class Viewer3D(gl.GLViewWidget):
         new_pan_y = self.start_state['pan_y'] + (self.target_state['pan_y'] - self.start_state['pan_y']) * ease
         self.pan_offset.setX(new_pan_x)
         self.pan_offset.setY(new_pan_y)
+
+        start_scale = self.start_state.get('scene_scale', 1.0)
+        target_scale = self.target_state.get('scene_scale', 1.0)
+        self.scene_scale = start_scale + (target_scale - start_scale) * ease
+        self._target_scene_scale = self.scene_scale
 
         self.setCameraPosition(
             distance=new_dist,

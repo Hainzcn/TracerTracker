@@ -180,9 +180,9 @@ class MainWindow(QMainWindow):
         self._status_label_style = "color: #999999; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif; border: none;"
         self._status_label_active_style = "color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif; border: none;"
 
-        self.udp_status_label = QLabel("⚪ UDP: Idle")
+        self.udp_status_label = QLabel("⚪ UDP: 无")
         self.udp_status_label.setStyleSheet(self._status_label_style)
-        self.serial_status_label = QLabel("⚪ Serial: Idle")
+        self.serial_status_label = QLabel("⚪ 串口: 无")
         self.serial_status_label.setStyleSheet(self._status_label_style)
 
         self.status_bar_layout.addWidget(self.udp_status_label)
