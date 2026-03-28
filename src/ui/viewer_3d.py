@@ -223,28 +223,57 @@ class Viewer3D(gl.GLViewWidget):
         return minor, major, max(0.0, min(1.0, phase))
 
     @staticmethod
-    def _build_grid_lines(spacing, half_extent, skip_multiple=0):
-        """Generate line-pair vertices for a grid on the XOY plane (z=0).
+    def _build_grid_lines(spacing, half_extent, skip_multiple=0,
+                          base_rgba=None, fade_radius=None):
+        """Generate line-pair vertices with per-line edge fade on XOY (z=0).
 
-        Returns np.ndarray of shape (N, 3) for GLLinePlotItem mode='lines'.
-        If skip_multiple > 0, lines whose index is a multiple of that value
-        are omitted (used by minor grid to avoid overlapping major lines).
+        Returns (positions, colors) where positions is (N,3) and colors is
+        (N,4).  Lines far from the origin fade to transparent so the grid
+        boundary is never a hard edge.
+
+        fade_radius -- absolute distance from origin where fade begins.
+                       Lines closer than this are at full alpha; lines
+                       beyond fade out quadratically toward half_extent.
+                       If None, no fade is applied.
         """
-        if spacing <= 0 or half_extent <= 0:
-            return np.zeros((0, 3), dtype=np.float32)
+        empty_pos = np.zeros((0, 3), dtype=np.float32)
+        empty_col = np.zeros((0, 4), dtype=np.float32)
+        if spacing <= 0 or half_extent <= 0 or base_rgba is None:
+            return empty_pos, empty_col
+
         n = int(half_extent / spacing + 0.5)
-        segments = []
+        verts = []
+        colors = []
+
+        do_fade = fade_radius is not None and fade_radius < half_extent
+        inv_fade_range = 1.0 / max(half_extent - fade_radius, 1e-9) if do_fade else 1.0
+
         for i in range(-n, n + 1):
             if skip_multiple > 0 and i % skip_multiple == 0:
                 continue
             coord = i * spacing
-            segments.append([-half_extent, coord, 0.0])
-            segments.append([ half_extent, coord, 0.0])
-            segments.append([coord, -half_extent, 0.0])
-            segments.append([coord,  half_extent, 0.0])
-        if not segments:
-            return np.zeros((0, 3), dtype=np.float32)
-        return np.array(segments, dtype=np.float32)
+            d = abs(coord)
+
+            if do_fade and d > fade_radius:
+                alpha_mult = max(0.0, 1.0 - ((d - fade_radius) * inv_fade_range) ** 2)
+                if alpha_mult < 1e-4:
+                    continue
+            else:
+                alpha_mult = 1.0
+
+            c = base_rgba.copy()
+            c[3] *= alpha_mult
+
+            verts.append([-half_extent, coord, 0.0])
+            verts.append([ half_extent, coord, 0.0])
+            colors.append(c); colors.append(c)
+            verts.append([coord, -half_extent, 0.0])
+            verts.append([coord,  half_extent, 0.0])
+            colors.append(c); colors.append(c)
+
+        if not verts:
+            return empty_pos, empty_col
+        return np.array(verts, dtype=np.float32), np.array(colors, dtype=np.float32)
 
     def add_custom_axes(self):
         self.axes_width = 3
@@ -312,27 +341,29 @@ class Viewer3D(gl.GLViewWidget):
         # fade = 1 → 副网格完全可见（即将升级为主网格）
         # fade = 0 → 副网格不可见（刚刚进入新级别，线太密）
         fade = max(0.0, min(1.0, 1.0 - phase_t))
-        minor_alpha = int(self.GRID_MAJOR_ALPHA * fade ** 1.5)
-        minor_width = self.GRID_MINOR_WIDTH_MIN + (self.GRID_MAJOR_WIDTH - self.GRID_MINOR_WIDTH_MIN) * fade
+        minor_alpha = int(self.GRID_MAJOR_ALPHA * fade ** 3.0)
+        minor_width = self.GRID_MINOR_WIDTH_MIN + (self.GRID_MAJOR_WIDTH - self.GRID_MINOR_WIDTH_MIN) * fade ** 2.0
 
         # --- 网格（XOY 平面）---
-        half_extent_raw = max(pos_ext * 2, 20)
+        half_extent_raw = max(pos_ext * 4, 40)
         half_extent = math.ceil(half_extent_raw / max(major_sp, 1e-15)) * major_sp
+        grid_fade_radius = pos_ext * 1.2
 
-        major_verts = self._build_grid_lines(major_sp, half_extent)
+        major_rgba = np.array([0.0, 1.0, 1.0, self.GRID_MAJOR_ALPHA / 255.0], dtype=np.float32)
+        major_verts, major_colors = self._build_grid_lines(
+            major_sp, half_extent, base_rgba=major_rgba, fade_radius=grid_fade_radius)
         if len(major_verts) >= 2:
-            major_color = np.array([0.0, 1.0, 1.0, self.GRID_MAJOR_ALPHA / 255.0], dtype=np.float32)
-            major_colors = np.tile(major_color, (len(major_verts), 1))
             self.grid_major_item.setData(pos=major_verts, color=major_colors, mode='lines')
             self.grid_major_item.setVisible(True)
         else:
             self.grid_major_item.setVisible(False)
 
         if minor_alpha > 0:
-            minor_verts = self._build_grid_lines(minor_sp, half_extent, skip_multiple=5)
+            minor_rgba = np.array([0.0, 1.0, 1.0, minor_alpha / 255.0], dtype=np.float32)
+            minor_verts, minor_colors = self._build_grid_lines(
+                minor_sp, half_extent, skip_multiple=5, base_rgba=minor_rgba,
+                fade_radius=grid_fade_radius)
             if len(minor_verts) >= 2:
-                minor_color = np.array([0.0, 1.0, 1.0, minor_alpha / 255.0], dtype=np.float32)
-                minor_colors = np.tile(minor_color, (len(minor_verts), 1))
                 self.grid_minor_item.setData(pos=minor_verts, color=minor_colors, mode='lines',
                                              width=minor_width)
                 self.grid_minor_item.setVisible(True)
