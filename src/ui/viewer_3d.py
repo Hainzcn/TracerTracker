@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, QPoint, QTimer, QTime, Signal
 from PySide6.QtGui import QVector3D, QColor, QMatrix4x4
 import pyqtgraph.opengl as gl
 import numpy as np
+from OpenGL.GL import GL_DEPTH_TEST, GL_BLEND, GL_ALPHA_TEST, GL_CULL_FACE, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +56,22 @@ class Viewer3D(gl.GLViewWidget):
         self.GRID_MINOR_WIDTH_MIN = 0.5
         self.GRID_MAJOR_ALPHA = 40
 
+        _grid_gl_opts = {
+            GL_DEPTH_TEST: False,
+            GL_BLEND: True,
+            GL_ALPHA_TEST: False,
+            GL_CULL_FACE: False,
+            'glBlendFunc': (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA),
+        }
+
         self.grid_major_item = gl.GLLinePlotItem(mode='lines', width=self.GRID_MAJOR_WIDTH, antialias=True)
-        self.grid_major_item.setGLOptions('translucent')
+        self.grid_major_item.setGLOptions(_grid_gl_opts)
+        self.grid_major_item.setDepthValue(-1000)
         self.addItem(self.grid_major_item)
 
         self.grid_minor_item = gl.GLLinePlotItem(mode='lines', width=self.GRID_MINOR_WIDTH_MIN, antialias=True)
-        self.grid_minor_item.setGLOptions('translucent')
+        self.grid_minor_item.setGLOptions(_grid_gl_opts)
+        self.grid_minor_item.setDepthValue(-1000)
         self.addItem(self.grid_minor_item)
         
         # 添加加粗加长的自定义坐标轴
@@ -135,6 +146,7 @@ class Viewer3D(gl.GLViewWidget):
     def _create_axis_label(self, text, pos, color):
         try:
             label = gl.GLTextItem(pos=np.asarray(pos, dtype=float), text=text, color=color)
+            label.setData(alignment=Qt.AlignmentFlag.AlignCenter)
             self.addItem(label)
             return label
         except Exception:
@@ -304,6 +316,10 @@ class Viewer3D(gl.GLViewWidget):
         self.addItem(self.y_axis)
         self.addItem(self.z_axis)
 
+        # 坐标轴箭头（填充三角形 + Billboard）
+        self.axis_arrows = gl.GLMeshItem(smooth=True, computeNormals=False, glOptions='translucent')
+        self.addItem(self.axis_arrows)
+
         self.x_label = self._create_axis_label('X', [20.0, 0.0, 0.0], QColor(255, 0, 0, 255))
         self.y_label = self._create_axis_label('Y', [0.0, 20.0, 0.0], QColor(0, 255, 0, 255))
         self.z_label = self._create_axis_label('Z', [0.0, 0.0, 20.0], QColor(0, 0, 255, 255))
@@ -324,25 +340,104 @@ class Viewer3D(gl.GLViewWidget):
 
         self.update_coordinate_system()
 
+    def _update_arrow_billboard(self, pos_ext=None, axis_length=None):
+        """Recalculate billboard arrow triangles so they always face the camera.
+
+        When called from update_coordinate_system(), pos_ext and axis_length are
+        passed directly.  When called standalone (e.g. during orbit), they are
+        derived from the current camera distance.
+        """
+        if pos_ext is None or axis_length is None:
+            dist = self.cameraParams()['distance']
+            axis_length = dist * self.AXIS_VISUAL_RATIO / self.scene_scale
+            pos_ext = axis_length
+
+        arrow_len = axis_length * 0.05
+        arrow_width = arrow_len * 0.4
+
+        cam_params = self.cameraParams()
+        elev = np.radians(cam_params['elevation'])
+        azim = np.radians(cam_params['azimuth'])
+        cam_dir = np.array([
+            np.cos(elev) * np.sin(azim),
+            np.cos(elev) * np.cos(azim),
+            -np.sin(elev)
+        ], dtype=np.float32)
+
+        cam_len = np.linalg.norm(cam_dir)
+        if cam_len > 1e-6:
+            cam_dir /= cam_len
+        else:
+            cam_dir = np.array([0, 1, 0], dtype=np.float32)
+
+        def _width_vec(axis_dir, fallback):
+            w = np.cross(axis_dir, cam_dir)
+            wl = np.linalg.norm(w)
+            return w / wl if wl > 1e-6 else fallback
+
+        dir_x = np.array([1, 0, 0], dtype=np.float32)
+        dir_y = np.array([0, 1, 0], dtype=np.float32)
+        dir_z = np.array([0, 0, 1], dtype=np.float32)
+
+        w_x = _width_vec(dir_x, dir_y) * arrow_width
+        w_y = _width_vec(dir_y, dir_x) * arrow_width
+        w_z = _width_vec(dir_z, dir_x) * arrow_width
+
+        tip_x = dir_x * (pos_ext + arrow_len)
+        base_x = dir_x * pos_ext
+        tip_y = dir_y * (pos_ext + arrow_len)
+        base_y = dir_y * pos_ext
+        tip_z = dir_z * (pos_ext + arrow_len)
+        base_z = dir_z * pos_ext
+
+        verts = np.array([
+            tip_x,        base_x - w_x, base_x + w_x,  # X
+            tip_y,        base_y - w_y, base_y + w_y,  # Y
+            tip_z,        base_z - w_z, base_z + w_z,  # Z
+        ], dtype=np.float32)
+
+        faces = np.array([
+            [0, 1, 2],
+            [3, 4, 5],
+            [6, 7, 8],
+        ], dtype=np.uint32)
+
+        vertex_colors = np.array([
+            [1, 0, 0, 1], [1, 0, 0, 1], [1, 0, 0, 1],
+            [0, 1, 0, 1], [0, 1, 0, 1], [0, 1, 0, 1],
+            [0, 0, 1, 1], [0, 0, 1, 1], [0, 0, 1, 1],
+        ], dtype=np.float32)
+
+        self.axis_arrows.setMeshData(
+            vertexes=verts, faces=faces, vertexColors=vertex_colors
+        )
+
     def update_coordinate_system(self):
         dist = self.cameraParams()['distance']
         axis_length = dist * self.AXIS_VISUAL_RATIO / self.scene_scale
         neg_ext = -axis_length * 0.5
         pos_ext = axis_length
+        fade_start = neg_ext * 0.5
 
-        # --- 坐标轴线 ---
+        # --- 坐标轴线（带负半轴渐隐） ---
         self.x_axis.setData(
-            pos=np.array([[neg_ext, 0, 0], [pos_ext, 0, 0]], dtype=np.float32),
-            color=(1, 0, 0, 1))
+            pos=np.array([[neg_ext, 0, 0], [fade_start, 0, 0], [pos_ext, 0, 0]], dtype=np.float32),
+            color=np.array([[1, 0, 0, 0], [1, 0, 0, 1], [1, 0, 0, 1]], dtype=np.float32),
+            mode='line_strip')
         self.y_axis.setData(
-            pos=np.array([[0, neg_ext, 0], [0, pos_ext, 0]], dtype=np.float32),
-            color=(0, 1, 0, 1))
+            pos=np.array([[0, neg_ext, 0], [0, fade_start, 0], [0, pos_ext, 0]], dtype=np.float32),
+            color=np.array([[0, 1, 0, 0], [0, 1, 0, 1], [0, 1, 0, 1]], dtype=np.float32),
+            mode='line_strip')
         self.z_axis.setData(
-            pos=np.array([[0, 0, neg_ext], [0, 0, pos_ext]], dtype=np.float32),
-            color=(0, 0, 1, 1))
+            pos=np.array([[0, 0, neg_ext], [0, 0, fade_start], [0, 0, pos_ext]], dtype=np.float32),
+            color=np.array([[0, 0, 1, 0], [0, 0, 1, 1], [0, 0, 1, 1]], dtype=np.float32),
+            mode='line_strip')
+
+        # --- 坐标轴箭头 (Billboard 填充三角形) ---
+        self._update_arrow_billboard(pos_ext, axis_length)
 
         # --- 坐标轴名称标签 ---
-        label_offset = pos_ext * 1.08
+        label_offset = pos_ext + axis_length * 0.05 * 1.5
         if self.x_label is not None:
             self.x_label.setData(pos=np.array([label_offset, 0, 0], dtype=np.float32))
         if self.y_label is not None:
@@ -405,7 +500,7 @@ class Viewer3D(gl.GLViewWidget):
             val = major_sp
             while val <= pos_ext + 1e-9:
                 for sign_val in ([val, -val] if val > 1e-9 else [val]):
-                    if sign_val < neg_ext - 1e-9 or sign_val > pos_ext + 1e-9:
+                    if sign_val < fade_start - 1e-9 or sign_val > pos_ext + 1e-9:
                         continue
                     p1 = np.zeros(3, dtype=np.float32)
                     p2 = np.zeros(3, dtype=np.float32)
@@ -797,6 +892,7 @@ class Viewer3D(gl.GLViewWidget):
         if ev.buttons() == Qt.MouseButton.LeftButton:
             # 旋转（轨道）
             self.orbit(diff.x(), diff.y())
+            self._update_arrow_billboard()
             
         elif ev.buttons() == Qt.MouseButton.RightButton:
             dist = self.cameraParams()['distance']
