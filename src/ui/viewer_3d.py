@@ -22,6 +22,7 @@ class Viewer3D(gl.GLViewWidget):
     """
     # 调试日志信号
     log_message = Signal(str)
+    camera_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -893,6 +894,7 @@ class Viewer3D(gl.GLViewWidget):
             # 旋转（轨道）
             self.orbit(diff.x(), diff.y())
             self._update_arrow_billboard()
+            self.camera_changed.emit()
             
         elif ev.buttons() == Qt.MouseButton.RightButton:
             dist = self.cameraParams()['distance']
@@ -993,6 +995,40 @@ class Viewer3D(gl.GLViewWidget):
         self.animation_start_time = QTime.currentTime()
         self.animation_timer.start(16)
 
+    def animate_to_view(self, elevation, azimuth):
+        """Smoothly animate the camera to the given orientation."""
+        if self._zoom_anim_timer.isActive():
+            self._zoom_anim_timer.stop()
+
+        current_cam = self.cameraParams()
+
+        current_azim = current_cam['azimuth']
+        diff = azimuth - current_azim
+        diff = (diff + 180) % 360 - 180
+        effective_target_azim = current_azim + diff
+
+        self.start_state = {
+            'distance': current_cam['distance'],
+            'elevation': current_cam['elevation'],
+            'azimuth': current_cam['azimuth'],
+            'pan_x': self.pan_offset.x(),
+            'pan_y': self.pan_offset.y(),
+            'scene_scale': self.scene_scale,
+        }
+
+        self.target_state = {
+            'distance': current_cam['distance'],
+            'elevation': elevation,
+            'azimuth': effective_target_azim,
+            'pan_x': self.pan_offset.x(),
+            'pan_y': self.pan_offset.y(),
+            'scene_scale': self.scene_scale,
+        }
+
+        self._target_scene_scale = self.scene_scale
+        self.animation_start_time = QTime.currentTime()
+        self.animation_timer.start(16)
+
     def update_animation(self):
         if not self.animation_start_time:
             return
@@ -1026,4 +1062,5 @@ class Viewer3D(gl.GLViewWidget):
             azimuth=new_azim
         )
         self.update_coordinate_system()
+        self.camera_changed.emit()
         self.update()

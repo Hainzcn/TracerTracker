@@ -12,6 +12,7 @@ import serial.tools.list_ports
 from src.ui.viewer_3d import Viewer3D
 from src.ui.attitude_widget import AttitudeWidget
 from src.ui.sensor_info_overlay import SensorInfoOverlay
+from src.ui.view_gizmo import ViewOrientationGizmo
 from src.utils.config_loader import ConfigLoader
 from src.utils.data_receiver import DataReceiver
 from src.utils.pose_processor import PoseProcessor
@@ -98,6 +99,12 @@ class MainWindow(QMainWindow):
         self.attitude_widget = AttitudeWidget(self.viewer)
         self.sensor_overlay = SensorInfoOverlay(self.viewer)
         self.pose_processor.velocity_updated.connect(self.sensor_overlay.update_velocity)
+
+        self.view_gizmo = ViewOrientationGizmo(self.viewer, parent=self.viewer)
+        self.viewer.camera_changed.connect(self.view_gizmo.update_orientation)
+        self.view_gizmo.view_selected.connect(self.viewer.animate_to_view)
+        self.view_gizmo.show()
+
         self.viewer.installEventFilter(self)
         
         # 检查配置以确定是否需要四元数数据
@@ -674,6 +681,7 @@ class MainWindow(QMainWindow):
         so = self.sensor_overlay
         so.adjustSize()
         so.move(vw - so.width() - margin, vh - so.height() - margin)
+        self.view_gizmo.move(margin, margin)
 
     def on_data_received(self, source, prefix, data):
         """处理从 UDP 或串口接收到的数据。"""
