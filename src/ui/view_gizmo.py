@@ -129,6 +129,15 @@ class ViewOrientationGizmo(QWidget):
                 'line_from': (self._SIZE / 2, self._SIZE / 2),
                 'scale': scale_neg,
             })
+        for ep in endpoints:
+            color = QColor(ep['color'])
+            depth = ep['depth']
+            if depth < 0:
+                h, s, v, a = color.getHsv()
+                factor = max(0.3, 1.0 + depth * 0.3)
+                color.setHsv(h, int(s * factor), int(v * factor), a)
+            ep['shaded_color'] = color
+
         endpoints.sort(key=lambda ep: ep['depth'])
         return endpoints
 
@@ -148,31 +157,23 @@ class ViewOrientationGizmo(QWidget):
 
         endpoints = self._build_endpoints()
 
-        # Draw lines only for positive axes
+        # Draw lines and spheres in a single back-to-front pass
         for ep in endpoints:
-            if ep['positive']:
-                color = ep['color']
-                pen = QPen(color, 2.5)
-                pen.setCapStyle(Qt.RoundCap)
-                painter.setPen(pen)
-                painter.drawLine(QPointF(cx, cy), QPointF(ep['x'], ep['y']))
-
-        for ep in endpoints:
-            r = ep['radius']
-            color = QColor(ep['color'])
-            
-            # Reduce saturation and value based on depth to improve spatial feel
-            depth = ep['depth']
-            if depth < 0:
-                h, s, v, a = color.getHsv()
-                # depth is typically between -1 and 1 roughly
-                factor = max(0.3, 1.0 + depth * 0.4)
-                color.setHsv(h, int(s * factor), int(v * factor), a)
+            color = QColor(ep['shaded_color'])
 
             is_hovered = (ep['key'] == self._hovered_key)
             if is_hovered:
                 color = color.lighter(130)
 
+            # Draw the connecting line first (only for positive axes, as requested)
+            if ep['positive']:
+                pen = QPen(color, 2.5 * ep['scale'])
+                pen.setCapStyle(Qt.RoundCap)
+                painter.setPen(pen)
+                painter.drawLine(QPointF(cx, cy), QPointF(ep['x'], ep['y']))
+
+            r = ep['radius']
+            
             if ep['positive']:
                 # Solid circle for positive axes
                 painter.setPen(Qt.NoPen)

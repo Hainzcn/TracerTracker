@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         
-        self.setWindowTitle("TracerTracker - 3D 路径可视化")
+        self.setWindowTitle("TracerTracker")
         self.resize(1280, 720)
         
         self.config_loader = ConfigLoader()
