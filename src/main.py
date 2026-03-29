@@ -8,6 +8,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QSurfaceFormat
 from src.ui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,11 @@ def main():
     )
 
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-    
+
+    fmt = QSurfaceFormat()
+    fmt.setAlphaBufferSize(8)
+    QSurfaceFormat.setDefaultFormat(fmt)
+
     app = QApplication(sys.argv)
     app.setApplicationName("TracerTracker")
     

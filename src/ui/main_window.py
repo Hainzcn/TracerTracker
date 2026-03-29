@@ -677,11 +677,12 @@ class MainWindow(QMainWindow):
         vh = self.viewer.height()
         margin = 10
         aw = self.attitude_widget
-        aw.move(vw - aw.width() - margin, margin)
+        aw.move(margin, margin)
         so = self.sensor_overlay
         so.adjustSize()
         so.move(vw - so.width() - margin, vh - so.height() - margin)
-        self.view_gizmo.move(margin, margin)
+        vg = self.view_gizmo
+        vg.move(vw - vg.width() - margin, margin)
 
     def on_data_received(self, source, prefix, data):
         """处理从 UDP 或串口接收到的数据。"""
