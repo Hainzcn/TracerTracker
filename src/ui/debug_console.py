@@ -22,7 +22,7 @@ from src.ui.styles import CONSOLE_STYLE, STYLE_FOLD_BTN_LEFT, STYLE_FOLD_BTN_RIG
 class RotatingButton(QPushButton):
     """支持翻转动画的折叠按钮，通过矢量三角形实现方向切换。"""
 
-    ANIM_DURATION = 300
+    ANIM_DURATION = 180
 
     def __init__(self, base_char, parent=None):
         super().__init__("", parent)
@@ -138,7 +138,8 @@ class DebugConsole(QWidget):
     all_collapsed = Signal()
 
     EXPANDED_HEIGHT = 200
-    ANIM_DURATION = 250
+    ANIM_DURATION = 180
+    DRAG_COLLAPSE_THRESHOLD = 50
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -164,6 +165,7 @@ class DebugConsole(QWidget):
         self._render_suspend_count = 0
         self._pending_raw_logs = []
         self._pending_debug_logs = []
+        self._interaction_suspend_count = 0
         self._log_flush_timer = QTimer(self)
         self._log_flush_timer.setSingleShot(True)
         self._log_flush_timer.setInterval(50)
@@ -178,6 +180,8 @@ class DebugConsole(QWidget):
         self.raw_data_console.setReadOnly(True)
         self.raw_data_console.setUndoRedoEnabled(False)
         self.raw_data_console.setCenterOnScroll(False)
+        self.raw_data_console.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.raw_data_console.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.raw_data_console.document().setMaximumBlockCount(500)
         self.raw_data_console.setPlaceholderText("原始数据日志...")
         self.raw_data_console.setStyleSheet(CONSOLE_STYLE)
@@ -189,6 +193,8 @@ class DebugConsole(QWidget):
         self.debug_info_console.setReadOnly(True)
         self.debug_info_console.setUndoRedoEnabled(False)
         self.debug_info_console.setCenterOnScroll(False)
+        self.debug_info_console.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.debug_info_console.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.debug_info_console.document().setMaximumBlockCount(500)
         self.debug_info_console.setPlaceholderText("调试信息与姿态处理日志...")
         self.debug_info_console.setStyleSheet(CONSOLE_STYLE)
@@ -246,7 +252,7 @@ class DebugConsole(QWidget):
         self.splitter.setHandleWidth(2)
 
         self._splitter_anim = QVariantAnimation(self)
-        self._splitter_anim.setDuration(300)
+        self._splitter_anim.setDuration(180)
         self._splitter_anim.setEasingCurve(QEasingCurve.OutCubic)
         self._splitter_anim.valueChanged.connect(self._on_splitter_anim_step)
         self._splitter_anim.finished.connect(self._on_splitter_anim_finished)
@@ -266,31 +272,6 @@ class DebugConsole(QWidget):
         self._target_visible = bool(state)
         self._anim_group.stop()
         if self._target_visible:
-            # 展开时重置折叠状态
-            if self.left_collapsed:
-                self.left_collapsed = False
-                self.btn_fold_left.reset_flip(False)
-                self.btn_fold_left.setProperty("collapsed", False)
-                self.btn_fold_left.style().unpolish(self.btn_fold_left)
-                self.btn_fold_left.style().polish(self.btn_fold_left)
-                self.left_wrapper.show()
-                self.raw_data_console.setLineWrapMode(QPlainTextEdit.WidgetWidth)
-            if self.right_collapsed:
-                self.right_collapsed = False
-                self.btn_fold_right.reset_flip(False)
-                self.btn_fold_right.setProperty("collapsed", False)
-                self.btn_fold_right.style().unpolish(self.btn_fold_right)
-                self.btn_fold_right.style().polish(self.btn_fold_right)
-                self.right_wrapper.show()
-                self.debug_info_console.setLineWrapMode(QPlainTextEdit.WidgetWidth)
-            self._sync_splitter_handle()
-            
-            # 恢复之前保存的尺寸
-            if sum(self.saved_sizes) > 0:
-                self.splitter.setSizes(self.saved_sizes)
-            else:
-                self.splitter.setSizes([640, 640])
-
             if not self.isVisible():
                 self.setMinimumHeight(0)
                 self.setMaximumHeight(0)
@@ -298,10 +279,12 @@ class DebugConsole(QWidget):
                 current_h = 0
             else:
                 current_h = self.height()
+            self._restore_panel_layout()
             target_h = self.EXPANDED_HEIGHT
         else:
             current_h = self.height()
             target_h = 0
+        self._suspend_interaction()
         self._suspend_console_rendering()
         for anim in (self._anim_min, self._anim_max):
             anim.setStartValue(current_h)
@@ -318,6 +301,7 @@ class DebugConsole(QWidget):
             self.raw_data_console.clear()
             self.debug_info_console.clear()
         self._resume_console_rendering()
+        self._resume_interaction()
 
     def _on_splitter_anim_step(self, value):
         if not hasattr(self, '_anim_start_sizes') or not hasattr(self, '_anim_end_sizes'):
@@ -335,11 +319,13 @@ class DebugConsole(QWidget):
             self.right_wrapper.hide()
         self._sync_splitter_handle()
         self._resume_console_rendering()
+        self._resume_interaction()
         self._check_all_collapsed()
 
     def _start_splitter_anim(self, start_sizes, end_sizes):
         self._anim_start_sizes = start_sizes
         self._anim_end_sizes = end_sizes
+        self._suspend_interaction()
         self._suspend_console_rendering()
         self._splitter_anim.setStartValue(0.0)
         self._splitter_anim.setEndValue(1.0)
@@ -348,12 +334,65 @@ class DebugConsole(QWidget):
     def _sync_splitter_handle(self):
         self.splitter.setHandleWidth(0 if (self.left_collapsed or self.right_collapsed) else 2)
 
+    def _set_button_collapsed_state(self, button, collapsed):
+        button.reset_flip(collapsed)
+        button.setProperty("collapsed", collapsed)
+        button.style().unpolish(button)
+        button.style().polish(button)
+
+    def _restore_panel_layout(self):
+        self._set_button_collapsed_state(self.btn_fold_left, self.left_collapsed)
+        self._set_button_collapsed_state(self.btn_fold_right, self.right_collapsed)
+
+        if self.left_collapsed:
+            self.left_wrapper.hide()
+            self.raw_data_console.setLineWrapMode(QPlainTextEdit.NoWrap)
+        else:
+            self.left_wrapper.show()
+            self.raw_data_console.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+
+        if self.right_collapsed:
+            self.right_wrapper.hide()
+            self.debug_info_console.setLineWrapMode(QPlainTextEdit.NoWrap)
+        else:
+            self.right_wrapper.show()
+            self.debug_info_console.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+
+        total_size = max(sum(self.saved_sizes), self.splitter.width(), 1)
+        if self.left_collapsed and not self.right_collapsed:
+            self.splitter.setSizes([0, total_size])
+        elif self.right_collapsed and not self.left_collapsed:
+            self.splitter.setSizes([total_size, 0])
+        elif not self.left_collapsed and not self.right_collapsed:
+            if sum(self.saved_sizes) > 0:
+                self.splitter.setSizes(self.saved_sizes)
+            else:
+                self.splitter.setSizes([640, 640])
+        self._sync_splitter_handle()
+
+    def _suspend_interaction(self):
+        self._interaction_suspend_count += 1
+        if self._interaction_suspend_count > 1:
+            return
+        for widget in (self.splitter, self.btn_fold_left, self.btn_fold_right):
+            widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+    def _resume_interaction(self):
+        if self._interaction_suspend_count == 0:
+            return
+        self._interaction_suspend_count -= 1
+        if self._interaction_suspend_count > 0:
+            return
+        for widget in (self.splitter, self.btn_fold_left, self.btn_fold_right):
+            widget.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+
     def _suspend_console_rendering(self):
         self._render_suspend_count += 1
         if self._render_suspend_count > 1:
             return
         for console in (self.raw_data_console, self.debug_info_console):
             console.setLineWrapMode(QPlainTextEdit.NoWrap)
+            console.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
     def _resume_console_rendering(self):
         if self._render_suspend_count == 0:
@@ -368,12 +407,27 @@ class DebugConsole(QWidget):
             QPlainTextEdit.NoWrap if self.right_collapsed else QPlainTextEdit.WidgetWidth
         )
         for console in (self.raw_data_console, self.debug_info_console):
+            console.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             console.viewport().update()
         self._flush_pending_logs()
 
     def _on_splitter_moved(self, _pos, _index):
         if self._splitter_anim.state() == QVariantAnimation.Running:
             return
+        current_sizes = self.splitter.sizes()
+        if not self.left_collapsed and not self.right_collapsed:
+            collapse_threshold = max(
+                self.DRAG_COLLAPSE_THRESHOLD,
+                self.btn_fold_left.width(),
+                self.btn_fold_right.width(),
+            )
+            if current_sizes[0] <= collapse_threshold:
+                self._collapse_panel_from_drag("left")
+                return
+            if current_sizes[1] <= collapse_threshold:
+                self._collapse_panel_from_drag("right")
+                return
+            self.saved_sizes = current_sizes[:]
         if not self._interactive_resize_active:
             self._interactive_resize_active = True
             self._suspend_console_rendering()
@@ -387,6 +441,31 @@ class DebugConsole(QWidget):
             return
         self._interactive_resize_active = False
         self._resume_console_rendering()
+
+    def _collapse_panel_from_drag(self, side):
+        self._resize_restore_timer.stop()
+        if self._interactive_resize_active:
+            self._interactive_resize_active = False
+            self._resume_console_rendering()
+
+        current_sizes = self.splitter.sizes()
+        total_size = current_sizes[0] + current_sizes[1]
+        if side == "left":
+            self.left_collapsed = True
+            self.raw_data_console.setLineWrapMode(QPlainTextEdit.NoWrap)
+            self.btn_fold_left.animate_flip(True)
+            self.btn_fold_left.setProperty("collapsed", True)
+            self.btn_fold_left.style().unpolish(self.btn_fold_left)
+            self.btn_fold_left.style().polish(self.btn_fold_left)
+            self._start_splitter_anim(current_sizes, [0, total_size])
+        else:
+            self.right_collapsed = True
+            self.debug_info_console.setLineWrapMode(QPlainTextEdit.NoWrap)
+            self.btn_fold_right.animate_flip(True)
+            self.btn_fold_right.setProperty("collapsed", True)
+            self.btn_fold_right.style().unpolish(self.btn_fold_right)
+            self.btn_fold_right.style().polish(self.btn_fold_right)
+            self._start_splitter_anim(current_sizes, [total_size, 0])
 
     def _schedule_log_flush(self):
         if not self._log_flush_timer.isActive():
