@@ -28,6 +28,7 @@ class RotatingButton(QPushButton):
         super().__init__("", parent)
         self._default_flip_scale = -1.0 if base_char == "◀" else 1.0
         self._flip_scale = self._default_flip_scale
+        self._show_down_arrow = False
 
         self._flip_anim = QPropertyAnimation(self, b"flipScale")
         self._flip_anim.setDuration(self.ANIM_DURATION)
@@ -43,6 +44,7 @@ class RotatingButton(QPushButton):
     flipScale = Property(float, _get_flip_scale, _set_flip_scale)
 
     def animate_flip(self, collapsed):
+        self._show_down_arrow = False
         target = -self._default_flip_scale if collapsed else self._default_flip_scale
         self._flip_anim.stop()
         self._flip_anim.setStartValue(float(self._flip_scale))
@@ -51,7 +53,15 @@ class RotatingButton(QPushButton):
 
     def reset_flip(self, collapsed=False):
         self._flip_anim.stop()
+        self._show_down_arrow = False
         self._flip_scale = -self._default_flip_scale if collapsed else self._default_flip_scale
+        self.update()
+
+    def set_down_arrow(self, enabled):
+        self._flip_anim.stop()
+        self._show_down_arrow = bool(enabled)
+        if not self._show_down_arrow:
+            self._flip_scale = self._default_flip_scale
         self.update()
 
     def enterEvent(self, event):
@@ -86,7 +96,10 @@ class RotatingButton(QPushButton):
         painter.setPen(Qt.NoPen)
         painter.setBrush(color)
         painter.translate(self.width() / 2, self.height() / 2)
-        painter.scale(self._flip_scale, 1.0)
+        if self._show_down_arrow:
+            painter.rotate(90.0)
+        else:
+            painter.scale(self._flip_scale, 1.0)
         painter.drawPolygon(triangle)
         painter.end()
 
@@ -166,6 +179,7 @@ class DebugConsole(QWidget):
         self._pending_raw_logs = []
         self._pending_debug_logs = []
         self._interaction_suspend_count = 0
+        self._reset_layout_on_next_show = False
         self._log_flush_timer = QTimer(self)
         self._log_flush_timer.setSingleShot(True)
         self._log_flush_timer.setInterval(50)
@@ -279,6 +293,9 @@ class DebugConsole(QWidget):
                 current_h = 0
             else:
                 current_h = self.height()
+            if self._reset_layout_on_next_show:
+                self._reset_layout_on_next_show = False
+                self._reset_to_default_layout()
             self._restore_panel_layout()
             target_h = self.EXPANDED_HEIGHT
         else:
@@ -335,10 +352,22 @@ class DebugConsole(QWidget):
         self.splitter.setHandleWidth(0 if (self.left_collapsed or self.right_collapsed) else 2)
 
     def _set_button_collapsed_state(self, button, collapsed):
+        button.set_down_arrow(False)
         button.reset_flip(collapsed)
         button.setProperty("collapsed", collapsed)
         button.style().unpolish(button)
         button.style().polish(button)
+
+    def _sync_button_arrow_directions(self):
+        if self.left_collapsed and not self.right_collapsed:
+            self.btn_fold_right.set_down_arrow(True)
+        else:
+            self.btn_fold_right.set_down_arrow(False)
+
+        if self.right_collapsed and not self.left_collapsed:
+            self.btn_fold_left.set_down_arrow(True)
+        else:
+            self.btn_fold_left.set_down_arrow(False)
 
     def _restore_panel_layout(self):
         self._set_button_collapsed_state(self.btn_fold_left, self.left_collapsed)
@@ -368,7 +397,13 @@ class DebugConsole(QWidget):
                 self.splitter.setSizes(self.saved_sizes)
             else:
                 self.splitter.setSizes([640, 640])
+        self._sync_button_arrow_directions()
         self._sync_splitter_handle()
+
+    def _reset_to_default_layout(self):
+        self.left_collapsed = False
+        self.right_collapsed = False
+        self.saved_sizes = [640, 640]
 
     def _suspend_interaction(self):
         self._interaction_suspend_count += 1
@@ -457,6 +492,7 @@ class DebugConsole(QWidget):
             self.btn_fold_left.setProperty("collapsed", True)
             self.btn_fold_left.style().unpolish(self.btn_fold_left)
             self.btn_fold_left.style().polish(self.btn_fold_left)
+            self.btn_fold_right.set_down_arrow(True)
             self._start_splitter_anim(current_sizes, [0, total_size])
         else:
             self.right_collapsed = True
@@ -465,6 +501,7 @@ class DebugConsole(QWidget):
             self.btn_fold_right.setProperty("collapsed", True)
             self.btn_fold_right.style().unpolish(self.btn_fold_right)
             self.btn_fold_right.style().polish(self.btn_fold_right)
+            self.btn_fold_left.set_down_arrow(True)
             self._start_splitter_anim(current_sizes, [total_size, 0])
 
     def _schedule_log_flush(self):
@@ -492,6 +529,8 @@ class DebugConsole(QWidget):
             self.left_collapsed = True
             self.raw_data_console.setLineWrapMode(QPlainTextEdit.NoWrap)
             self.btn_fold_left.reset_flip(True)
+            self.btn_fold_left.set_down_arrow(True)
+            self.btn_fold_right.set_down_arrow(False)
             self.btn_fold_left.setProperty("collapsed", True)
             self.btn_fold_left.style().unpolish(self.btn_fold_left)
             self.btn_fold_left.style().polish(self.btn_fold_left)
@@ -499,6 +538,8 @@ class DebugConsole(QWidget):
             self.right_collapsed = True
             self.debug_info_console.setLineWrapMode(QPlainTextEdit.NoWrap)
             self.btn_fold_right.reset_flip(True)
+            self.btn_fold_right.set_down_arrow(True)
+            self.btn_fold_left.set_down_arrow(False)
             self.btn_fold_right.setProperty("collapsed", True)
             self.btn_fold_right.style().unpolish(self.btn_fold_right)
             self.btn_fold_right.style().polish(self.btn_fold_right)
@@ -521,6 +562,7 @@ class DebugConsole(QWidget):
             self.btn_fold_left.setProperty("collapsed", True)
             self.btn_fold_left.style().unpolish(self.btn_fold_left)
             self.btn_fold_left.style().polish(self.btn_fold_left)
+            self.btn_fold_right.set_down_arrow(True)
             self.raw_data_console.setLineWrapMode(QPlainTextEdit.NoWrap)
             self._start_splitter_anim(current_sizes, [0, current_sizes[0] + current_sizes[1]])
         else:
@@ -530,6 +572,7 @@ class DebugConsole(QWidget):
             self.btn_fold_left.setProperty("collapsed", False)
             self.btn_fold_left.style().unpolish(self.btn_fold_left)
             self.btn_fold_left.style().polish(self.btn_fold_left)
+            self.btn_fold_right.set_down_arrow(False)
             self.left_wrapper.show()
             self.raw_data_console.setLineWrapMode(QPlainTextEdit.WidgetWidth)
             target_right = current_sizes[1] - self.saved_sizes[0]
@@ -551,6 +594,7 @@ class DebugConsole(QWidget):
             self.btn_fold_right.setProperty("collapsed", True)
             self.btn_fold_right.style().unpolish(self.btn_fold_right)
             self.btn_fold_right.style().polish(self.btn_fold_right)
+            self.btn_fold_left.set_down_arrow(True)
             self.debug_info_console.setLineWrapMode(QPlainTextEdit.NoWrap)
             self._start_splitter_anim(current_sizes, [current_sizes[0] + current_sizes[1], 0])
         else:
@@ -560,6 +604,7 @@ class DebugConsole(QWidget):
             self.btn_fold_right.setProperty("collapsed", False)
             self.btn_fold_right.style().unpolish(self.btn_fold_right)
             self.btn_fold_right.style().polish(self.btn_fold_right)
+            self.btn_fold_left.set_down_arrow(False)
             self.right_wrapper.show()
             self.debug_info_console.setLineWrapMode(QPlainTextEdit.WidgetWidth)
             target_left = current_sizes[0] - self.saved_sizes[1]
@@ -567,6 +612,7 @@ class DebugConsole(QWidget):
 
     def _check_all_collapsed(self):
         if self.left_collapsed and self.right_collapsed:
+            self._reset_layout_on_next_show = True
             self.all_collapsed.emit()
 
     def on_raw_data_received(self, source, raw_text):
