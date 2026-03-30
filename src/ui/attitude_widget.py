@@ -121,7 +121,7 @@ class AttitudeWidget(QWidget):
         labels[2].setText(f"Y:{yaw:+6.1f}\u00b0")
 
     def reset(self):
-        """Clear all attitude data and hide the widget."""
+        """清除所有姿态数据并隐藏小部件。"""
         self._has_data = False
         self.setVisible(False)
         for labels in (self.labels_raw, self.labels_madgwick, self.labels_mahony):

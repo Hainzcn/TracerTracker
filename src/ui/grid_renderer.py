@@ -20,8 +20,8 @@ _LOG5 = math.log(5.0)
 
 
 class GridRenderer:
-    """管理 3D 场景中的网格、坐标轴和刻度对象。
-
+    """
+    管理 3D 场景中的网格、坐标轴和刻度对象。
     由 Viewer3D 持有，通过 ``update()`` 在相机参数变化时刷新。
     """
 
@@ -76,7 +76,7 @@ class GridRenderer:
             return None
 
     def _setup_axes(self):
-        """Create axis lines, arrows, labels and tick infrastructure."""
+        """创建轴线、箭头、标签和刻度结构。"""
         self.axes_width = 3
 
         self.x_axis = gl.GLLinePlotItem(width=self.axes_width, antialias=True)
@@ -124,9 +124,9 @@ class GridRenderer:
 
     @staticmethod
     def compute_grid_spacings(view_range, target_minor_count=15):
-        """Compute two-level grid spacings using a pure x5 level sequence.
-
-        Returns (minor_spacing, major_spacing, phase_t).
+        """
+        使用纯x5层级序列计算两级网格间距。
+        返回（次要间距、主要间距、相位_t）。
         """
         if view_range <= 0:
             return 1.0, 5.0, 0.5
@@ -141,9 +141,9 @@ class GridRenderer:
     @staticmethod
     def build_grid_lines(spacing, half_extent, skip_multiple=0,
                          base_rgba=None, fade_radius=None):
-        """Generate line-pair vertices with per-line edge fade on XOY (z=0).
-
-        Returns (positions, colors) numpy arrays.
+        """
+        生成XOY平面（z=0）上具有每行边缘渐变效果的线对顶点。
+        返回（位置、颜色）numpy数组。
         """
         empty_pos = np.zeros((0, 3), dtype=np.float32)
         empty_col = np.zeros((0, 4), dtype=np.float32)
@@ -231,7 +231,7 @@ class GridRenderer:
 
     def update_arrow_billboard(self, camera_params=None, pos_ext=None,
                                axis_length=None, scene_scale=None):
-        """Recalculate billboard arrow triangles so they always face the camera."""
+        """重新计算 Billboard 效果箭头三角形，使其始终面向相机。"""
         if camera_params is None:
             camera_params = self._viewer.cameraParams()
 
@@ -305,7 +305,7 @@ class GridRenderer:
     # ------------------------------------------------------------------
 
     def update(self, distance, scene_scale):
-        """Refresh axes, grid, and ticks based on current camera state."""
+        """根据当前相机状态刷新轴线、网格和刻度。"""
         axis_length = distance * self.AXIS_VISUAL_RATIO / scene_scale
         neg_ext = -axis_length * 0.5
         pos_ext = axis_length

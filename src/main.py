@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 
 def main():
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.WARNING,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+    print("TracerTracker starting...")
 
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 

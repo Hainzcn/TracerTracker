@@ -35,7 +35,7 @@ class TrackRenderer:
         self.trail_length = 120
         self.trail_width_min = 2.4
         self.trail_width_max = 6.0
-        self.max_history_length = 10000
+        self.max_history_length = 20000
 
         self.first_point_rendered = False
 
@@ -51,7 +51,6 @@ class TrackRenderer:
             return
         point_text = f"[{name}]" if name is not None else "[GLOBAL]"
         msg = f"[Viewer3D][{level}]{point_text}[{code}] {detail}"
-        logger.debug(msg)
         self._viewer.log_message.emit(msg)
 
     # ------------------------------------------------------------------
@@ -112,6 +111,38 @@ class TrackRenderer:
         b = 0.06 + 0.14 * (1.0 - np.abs(n - 0.5) * 2.0)
         rgb = np.stack([r, g, b], axis=1).astype(np.float32)
         return np.clip(rgb, 0.0, 1.0)
+
+    @staticmethod
+    def _downsample_path(history):
+        """对路径历史进行分级下采样压缩。
+
+        最新 2000 个点完整保留。其余以 2000 为一组，
+        时间越久压缩程度越高（每组取等间距采样）。
+        """
+        n = len(history)
+        if n <= 2000:
+            return np.array(history, dtype=np.float32)
+
+        recent = history[-2000:]
+        older = history[:-2000]
+
+        segments = []
+        i = len(older)
+        level = 1
+        while i > 0:
+            start = max(0, i - 2000)
+            chunk = older[start:i]
+            step = min(2 ** level, len(chunk))
+            sampled = chunk[::step]
+            segments.append(sampled)
+            i = start
+            level += 1
+
+        segments.reverse()
+        parts = segments + [recent]
+        return np.array(
+            [p for seg in parts for p in seg], dtype=np.float32,
+        )
 
     @staticmethod
     def _hide_trail_item(item):
@@ -207,14 +238,20 @@ class TrackRenderer:
             self.point_speeds[name].append(speed)
             self.point_times[name].append(current_time)
             if len(self.point_histories[name]) > self.max_history_length:
+                origin = self.point_histories[name][0]
                 excess = (
                     len(self.point_histories[name]) - self.max_history_length
                 )
                 self.point_histories[name] = (
-                    self.point_histories[name][excess:]
+                    [origin] + self.point_histories[name][excess + 1:]
                 )
-                self.point_speeds[name] = self.point_speeds[name][excess:]
-                self.point_times[name] = self.point_times[name][excess:]
+                self.point_speeds[name] = (
+                    [0.0] + self.point_speeds[name][excess + 1:]
+                )
+                self.point_times[name] = (
+                    [self.point_times[name][0]]
+                    + self.point_times[name][excess + 1:]
+                )
             if self.full_path_mode or self.trail_mode:
                 history_len = len(self.point_histories[name])
                 self._render_debug(
@@ -302,10 +339,6 @@ class TrackRenderer:
         try:
             history = self.point_histories.get(name, [])
             if len(history) < 2:
-                self._render_debug(
-                    "PATH_SKIPPED_NOT_ENOUGH_POINTS",
-                    f"轨迹点不足，history_len={len(history)}", name, "WARN",
-                )
                 if name in self.path_items:
                     self.path_items[name].setVisible(False)
                 return
@@ -316,20 +349,13 @@ class TrackRenderer:
                 path_item.setGLOptions('translucent')
                 self._viewer.addItem(path_item)
                 self.path_items[name] = path_item
-                self._render_debug(
-                    "PATH_ITEM_CREATED", "已创建全路径绘制对象", name,
-                )
             rgba = np.array(color, dtype=np.float32)
             if rgba.shape[0] == 3:
                 rgba = np.append(rgba, 1.0)
             rgba[3] = 0.8
-            path_pos = np.array(history, dtype=np.float32)
+            path_pos = self._downsample_path(history)
             segment_pos, _, reason = self._build_line_segments(path_pos)
             if segment_pos is None:
-                self._render_debug(
-                    "PATH_SEGMENT_BUILD_FAILED",
-                    reason or "未知原因", name, "ERROR",
-                )
                 self.path_items[name].setVisible(False)
                 return
             segment_color = np.tile(rgba, (len(segment_pos), 1))
@@ -337,16 +363,8 @@ class TrackRenderer:
                 pos=segment_pos, color=segment_color, mode='lines', width=2.0,
             )
             self.path_items[name].setVisible(True)
-            self._render_debug(
-                "PATH_RENDER_OK",
-                f"全路径渲染成功，segment_count={len(segment_pos)}", name,
-            )
             self._viewer.update()
-        except Exception as exc:
-            self._render_debug(
-                "PATH_RENDER_EXCEPTION",
-                f"{type(exc).__name__}: {exc}", name, "ERROR",
-            )
+        except Exception:
             if name in self.path_items:
                 self.path_items[name].setVisible(False)
 

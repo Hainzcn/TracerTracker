@@ -7,7 +7,9 @@ import time
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTextEdit, QCheckBox,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import (
+    Qt, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup,
+)
 
 from src.ui.styles import STYLE_CHECKBOX, CONSOLE_STYLE
 
@@ -15,10 +17,23 @@ from src.ui.styles import STYLE_CHECKBOX, CONSOLE_STYLE
 class DebugConsole(QSplitter):
     """可切换显示的调试控制台，包含原始数据和调试日志两个面板。"""
 
+    EXPANDED_HEIGHT = 200
+    ANIM_DURATION = 250
+
     def __init__(self, parent=None):
         super().__init__(Qt.Horizontal, parent)
-        self.setFixedHeight(200)
-        self.hide()
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(0)
+
+        self._anim_min = QPropertyAnimation(self, b"minimumHeight")
+        self._anim_max = QPropertyAnimation(self, b"maximumHeight")
+        self._anim_group = QParallelAnimationGroup()
+        for anim in (self._anim_min, self._anim_max):
+            anim.setDuration(self.ANIM_DURATION)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            self._anim_group.addAnimation(anim)
+        self._anim_group.finished.connect(self._on_anim_finished)
+        self._target_visible = False
 
         self.show_parsed_data = False
 
@@ -60,13 +75,37 @@ class DebugConsole(QSplitter):
         self.addWidget(self.debug_info_console)
         self.setSizes([640, 640])
 
+        self.left_console_container.setMinimumHeight(0)
+        self.raw_data_console.setMinimumHeight(0)
+        self.debug_info_console.setMinimumHeight(0)
+        self.hide()
+
     # ── Public API ───────────────────────────────────────────────────
 
     def toggle_visibility(self, state):
-        """切换调试控制台的可见性。"""
-        if state:
-            self.show()
+        """切换调试控制台的可见性（带滑动动画）。"""
+        self._target_visible = bool(state)
+        self._anim_group.stop()
+        if self._target_visible:
+            if not self.isVisible():
+                self.setMinimumHeight(0)
+                self.setMaximumHeight(0)
+                self.show()
+                current_h = 0
+            else:
+                current_h = self.height()
+            target_h = self.EXPANDED_HEIGHT
         else:
+            current_h = self.height()
+            target_h = 0
+        for anim in (self._anim_min, self._anim_max):
+            anim.setStartValue(current_h)
+            anim.setEndValue(target_h)
+        self._anim_group.start()
+
+    def _on_anim_finished(self):
+        """动画结束后处理隐藏与清空。"""
+        if not self._target_visible:
             self.hide()
             self.raw_data_console.clear()
             self.debug_info_console.clear()
