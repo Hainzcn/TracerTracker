@@ -107,6 +107,10 @@ class MainWindow(QMainWindow):
         self._build_status_bar()
         self.layout.addWidget(self.status_bar_widget)
 
+        self.debug_console.all_collapsed.connect(
+            lambda: self.debug_checkbox.setChecked(False)
+        )
+
         # 全局样式
         self.setStyleSheet(MAIN_WINDOW_STYLE)
 
@@ -216,9 +220,6 @@ class MainWindow(QMainWindow):
             self.sensor_overlay.update_acceleration(
                 linear_acc[0], linear_acc[1], linear_acc[2],
             )
-        self.debug_console.on_parsed_data_updated(
-            source, prefix, linear_acc, gyr, mag,
-        )
 
     def _update_overlays(self, data):
         if len(data) >= 19:

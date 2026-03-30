@@ -139,13 +139,43 @@ STATUS_LABEL_ACTIVE_STYLE = (
 )
 
 CONSOLE_STYLE = """
-    QTextEdit {
+    QTextEdit, QPlainTextEdit {
         background-color: #1e1e1e;
         color: #d4d4d4;
         border: 1px solid #333333;
         font-family: 'Consolas', 'JetBrains Mono', monospace;
         font-size: 12px;
         padding: 4px;
+    }
+"""
+
+STYLE_FOLD_BTN_LEFT = """
+    QPushButton {
+        color: transparent;
+        background-color: transparent;
+        border: none;
+        border-radius: 0px;
+        font-weight: bold;
+        font-family: 'Microsoft YaHei', sans-serif;
+    }
+    QPushButton:hover {
+        color: #e0e0e0;
+        background-color: rgba(90, 90, 90, 180);
+    }
+"""
+
+STYLE_FOLD_BTN_RIGHT = """
+    QPushButton {
+        color: transparent;
+        background-color: transparent;
+        border: none;
+        border-radius: 0px;
+        font-weight: bold;
+        font-family: 'Microsoft YaHei', sans-serif;
+    }
+    QPushButton:hover {
+        color: #e0e0e0;
+        background-color: rgba(90, 90, 90, 180);
     }
 """
 
