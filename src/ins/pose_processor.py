@@ -4,18 +4,18 @@ import time
 import numpy as np
 from PySide6.QtCore import QObject, Signal
 
-from src.utils.ins_math import (
+from src.ins.math_utils import (
     initialize_orientation,
     rotate_vector,
     quat_multiply,
+)
+from src.ins.ahrs import (
     madgwick_update_6dof,
     madgwick_update_9dof,
     mahony_update_6dof,
     mahony_update_9dof,
-    LowPassFilter,
-    VerticalKalmanFilter,
-    ZUPTDetector,
 )
+from src.ins.filters import LowPassFilter, VerticalKalmanFilter, ZUPTDetector
 
 
 class PoseProcessor(QObject):
@@ -203,7 +203,6 @@ class PoseProcessor(QObject):
                     if should_log:
                         debug_msg.append("Updated Q (6DOF)")
 
-            # 独立运行 Madgwick / Mahony 滤波器用于姿态对比展示
             if gyr_vec is not None:
                 if mag_vec is not None:
                     self.q_madgwick = madgwick_update_9dof(
