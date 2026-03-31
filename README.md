@@ -13,20 +13,30 @@ TracerTracker/
 ├── README.md
 ├── src/
 │   ├── main.py                  # 入口：日志、QApplication 初始化
+│   ├── ins/
+│   │   ├── __init__.py
+│   │   ├── ahrs.py              # 姿态解算核心
+│   │   ├── filters.py           # 滤波器实现
+│   │   ├── math_utils.py        # 惯导/姿态数学工具
+│   │   └── pose_processor.py    # 姿态处理器：重力剥离、积分、信号分发
 │   ├── ui/
-│   │   ├── main_window.py       # 主窗口：数据流串联、调试控制台、状态栏
-│   │   ├── viewer_3d.py         # 3D 视图：坐标系、轨迹渲染、相机交互
 │   │   ├── attitude_widget.py   # 右上角姿态叠加层（四元数/欧拉角 + 小立方体）
-│   │   └── sensor_info_overlay.py  # 底部传感器叠加层（加速度、速度、气压高度）
+│   │   ├── debug_console.py     # 调试控制台
+│   │   ├── grid_renderer.py     # 参考网格、坐标轴、刻度渲染
+│   │   ├── main_window.py       # 主窗口：数据流串联、调试控制台、状态栏
+│   │   ├── sensor_info_overlay.py  # 底部传感器叠加层（加速度、速度、气压高度）
+│   │   ├── styles.py            # UI 样式常量
+│   │   ├── toolbar.py           # 顶部工具栏
+│   │   ├── track_renderer.py    # 点与轨迹渲染
+│   │   ├── viewer_3d.py         # 3D 视图：坐标系、轨迹渲染、相机交互
+│   │   └── view_gizmo.py        # 视角方向控件
 │   └── utils/
 │       ├── config_loader.py     # 单例配置加载/保存
-│       ├── data_receiver.py     # UDP / 串口数据接收（含 ATK-MS901M 二进制协议）
-│       ├── ins_math.py          # 惯性导航纯数学：Madgwick 滤波、四元数运算
-│       ├── pose_processor.py    # 姿态处理器：重力剥离、积分、信号分发
+│       ├── data_receiver.py     # UDP / 串口数据接收
 │       └── atkms901m_resolver.py  # ATK-MS901M 协议帧解析与流式解码
 └── tests/
-    ├── test_udp_prefix.py       # UDP 前缀路由测试发送器
-    └── test_udp_sender.py       # UDP 螺旋数据测试发送器
+    ├── test_udp_prefix.py       # UDP 前缀路由测试发送
+    └── test_udp_sender.py       # UDP 螺旋数据测试发送
 ```
 
 ## 数据流架构
@@ -65,6 +75,11 @@ TracerTracker/
 
 - **3D 渲染与交互**
   - 左键拖动旋转、右键拖动平移、滚轮缩放、中键复位。
+  - 支持 **透视 / 正交** 投影切换，并提供视角动画过渡。
+  - 右上角 `view_gizmo` 可快速切换到主视图 / 侧视图 / 顶视图等标准视角。
+  - 正交标准视图下，参考网格会在 `XOY / XOZ / YOZ` 平面之间自动切换；通常优先只显示一个主平面，切换边界附近保留短暂淡入淡出过渡。
+  - 坐标轴名字母与刻度标签会根据当前观察角度自动淡出朝向相机的轴；在透视和正交模式下均生效。
+  - 当坐标轴、箭头、刻度线或标签没入当前主参考平面背侧时，颜色会随深度降低明度与纯度，以增强空间层次感。
   - 全路径模式与速度尾迹模式，尾迹长度可调。
   - 多点独立渲染，颜色/大小可配置。
 
