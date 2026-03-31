@@ -262,7 +262,7 @@ class ViewOrientationGizmo(QWidget):
             # Drag to rotate
             diff = pos - self._last_mouse_pos
             self.viewer.orbit(diff.x(), diff.y())
-            self.viewer._update_arrow_billboard()
+            self.viewer.update_coordinate_system()
             self.viewer.camera_changed.emit()
             self.viewer.update()
             

@@ -7,6 +7,7 @@
 
 import logging
 import os
+from math import tan, radians
 
 from PySide6.QtCore import Qt, QPoint, QTimer, QTime, Signal
 from PySide6.QtGui import QVector3D, QMatrix4x4
@@ -30,6 +31,7 @@ class Viewer3D(gl.GLViewWidget):
 
     log_message = Signal(str)
     camera_changed = Signal()
+    projection_mode_changed = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -88,6 +90,13 @@ class Viewer3D(gl.GLViewWidget):
         self._zoom_anim_timer = QTimer(self)
         self._zoom_anim_timer.setInterval(16)
         self._zoom_anim_timer.timeout.connect(self._update_zoom_animation)
+
+        # 投影模式（正交 / 透视）
+        self._use_ortho = False
+        self._ortho_blend = 0.0
+        self._ortho_anim_timer = QTimer(self)
+        self._ortho_anim_timer.setInterval(16)
+        self._ortho_anim_timer.timeout.connect(self._update_ortho_animation)
 
         self.render_debug_enabled = (
             os.getenv("TRACER_RENDER_DEBUG", "0") == "1"
@@ -183,12 +192,12 @@ class Viewer3D(gl.GLViewWidget):
 
         if ev.buttons() == Qt.MouseButton.LeftButton:
             self.orbit(diff.x(), diff.y())
-            self._update_arrow_billboard()
+            self.update_coordinate_system()
             self.camera_changed.emit()
 
         elif ev.buttons() == Qt.MouseButton.RightButton:
             dist = self.cameraParams()['distance']
-            scale = dist / self.scene_scale * 0.001
+            scale = dist * 0.001
             self.pan_offset.setX(self.pan_offset.x() + diff.x() * scale)
             self.pan_offset.setY(self.pan_offset.y() - diff.y() * scale)
             self.update()
@@ -224,6 +233,87 @@ class Viewer3D(gl.GLViewWidget):
         m.translate(-center.x(), -center.y(), -center.z())
 
         return m
+
+    # ── Projection matrix ─────────────────────────────────────────────
+
+    def projectionMatrix(self, region, viewport):
+        x0, y0, w, h = viewport
+        dist = self.opts['distance']
+        fov = self.opts['fov']
+        nearClip = dist * 0.001
+        farClip = dist * 1000.0
+
+        r = nearClip * tan(0.5 * radians(fov))
+        t = r * h / w
+
+        left = r * ((region[0] - x0) * (2.0 / w) - 1)
+        right = r * ((region[0] + region[2] - x0) * (2.0 / w) - 1)
+        bottom = t * ((region[1] - y0) * (2.0 / h) - 1)
+        top = t * ((region[1] + region[3] - y0) * (2.0 / h) - 1)
+
+        if self._ortho_blend <= 0.0:
+            tr = QMatrix4x4()
+            tr.frustum(left, right, bottom, top, nearClip, farClip)
+            return tr
+
+        scale = dist / nearClip
+        ol = left * scale
+        or_ = right * scale
+        ob = bottom * scale
+        ot = top * scale
+
+        if self._ortho_blend >= 1.0:
+            tr = QMatrix4x4()
+            tr.ortho(ol, or_, ob, ot, nearClip, farClip)
+            return tr
+
+        persp = QMatrix4x4()
+        persp.frustum(left, right, bottom, top, nearClip, farClip)
+        ortho = QMatrix4x4()
+        ortho.ortho(ol, or_, ob, ot, nearClip, farClip)
+
+        b = self._ortho_blend
+        p = self._matrix4x4_to_list(persp)
+
+        # 正交矩阵的 w 分量为常量 1，而透视矩阵的 w 分量与 z 相关。
+        # 直接逐元素混合会在回切透视时生成数值尺度不一致的中间矩阵，
+        # 导致动画帧出现裁剪/渲染异常。先做齐次等价缩放再混合可保持稳定。
+        o = self._matrix4x4_to_list(ortho, scale=max(dist, 1e-6))
+
+        blended = [p[i] + (o[i] - p[i]) * b for i in range(16)]
+        return QMatrix4x4(*blended)
+
+    @staticmethod
+    def _matrix4x4_to_list(matrix, scale=1.0):
+        values = []
+        for row_idx in range(4):
+            row = matrix.row(row_idx)
+            values.extend([
+                row.x() * scale,
+                row.y() * scale,
+                row.z() * scale,
+                row.w() * scale,
+            ])
+        return values
+
+    def toggle_projection(self):
+        self._use_ortho = not self._use_ortho
+        if not self._ortho_anim_timer.isActive():
+            self._ortho_anim_timer.start()
+        self.projection_mode_changed.emit(self._use_ortho)
+
+    def _update_ortho_animation(self):
+        target = 1.0 if self._use_ortho else 0.0
+        lerp_speed = 0.18
+        diff = target - self._ortho_blend
+        if abs(diff) < 1e-4:
+            self._ortho_blend = target
+            self._ortho_anim_timer.stop()
+        else:
+            self._ortho_blend += diff * lerp_speed
+        self.update_coordinate_system()
+        self.camera_changed.emit()
+        self.update()
 
     # ── Animation ────────────────────────────────────────────────────
 

@@ -10,13 +10,14 @@ import time
 
 from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QLabel, QHBoxLayout, QSizePolicy,
-    QCheckBox, QSpinBox,
+    QCheckBox, QSpinBox, QPushButton,
 )
 from PySide6.QtCore import QTimer, Qt, QEvent
 
 from src.ui.styles import (
     STYLE_CHECKBOX, STYLE_SPINBOX, STATUS_LABEL_STYLE,
     STATUS_LABEL_ACTIVE_STYLE, MAIN_WINDOW_STYLE, STATUS_BAR_STYLE,
+    STYLE_PROJECTION_BTN,
 )
 from src.ui.viewer_3d import Viewer3D
 from src.ui.toolbar import ToolBar
@@ -88,6 +89,18 @@ class MainWindow(QMainWindow):
         self.viewer.camera_changed.connect(self.view_gizmo.update_orientation)
         self.view_gizmo.view_selected.connect(self.viewer.animate_to_view)
         self.view_gizmo.show()
+
+        self.proj_toggle_btn = QPushButton("透视", self.viewer)
+        self.proj_toggle_btn.setAttribute(Qt.WA_TranslucentBackground)
+        self.proj_toggle_btn.setStyleSheet(STYLE_PROJECTION_BTN)
+        self.proj_toggle_btn.setCursor(Qt.PointingHandCursor)
+        self.proj_toggle_btn.clicked.connect(self.viewer.toggle_projection)
+        self.viewer.projection_mode_changed.connect(
+            lambda ortho: self.proj_toggle_btn.setText(
+                "正交" if ortho else "透视",
+            ),
+        )
+        self.proj_toggle_btn.show()
 
         self.viewer.installEventFilter(self)
 
@@ -332,6 +345,12 @@ class MainWindow(QMainWindow):
         so.move(vw - so.width() - margin, vh - so.height() - margin)
         vg = self.view_gizmo
         vg.move(vw - vg.width() - margin, margin)
+        pb = self.proj_toggle_btn
+        pb.adjustSize()
+        pb.move(
+            vg.x() + (vg.width() - pb.width()) // 2,
+            vg.y() + vg.height() + 2,
+        )
 
     def eventFilter(self, obj, event):
         if obj is self.viewer and event.type() == QEvent.Resize:

@@ -218,3 +218,23 @@ MAIN_WINDOW_STYLE = """
 STATUS_BAR_STYLE = "background-color: #252526; border-top: 1px solid #333333;"
 
 TOP_BAR_STYLE = "background-color: #252526; border-bottom: 1px solid #333333;"
+
+STYLE_PROJECTION_BTN = """
+    QPushButton {
+        color: #aaaaaa;
+        background: transparent;
+        border: none;
+        border-radius: 0px;
+        font-size: 11px;
+        font-family: 'Microsoft YaHei', sans-serif;
+        padding: 2px 8px;
+    }
+    QPushButton:hover {
+        color: #cccccc;
+        background: rgba(180, 180, 180, 40);
+    }
+    QPushButton:pressed {
+        color: #dddddd;
+        background: rgba(180, 180, 180, 60);
+    }
+"""
