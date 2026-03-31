@@ -114,6 +114,9 @@ class MainWindow(QMainWindow):
         self.data_receiver.raw_data_received.connect(
             self.debug_console.on_raw_data_received,
         )
+        self.data_receiver.parsed_data_received.connect(
+            self.debug_console.on_parsed_data_received,
+        )
         self.layout.addWidget(self.debug_console)
 
         # 状态栏

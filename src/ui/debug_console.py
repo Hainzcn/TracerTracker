@@ -2,18 +2,20 @@
 调试控制台组件：原始数据日志与调试信息显示。
 """
 
+from collections import deque
 import time
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QSplitter, QPlainTextEdit, QPushButton, QSizePolicy,
+    QApplication,
 )
 from PySide6.QtCore import (
     Qt, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup,
-    QVariantAnimation, Signal, Property, QPointF, QTimer
+    QVariantAnimation, Signal, Property, QPointF, QTimer, QEvent
 )
 from PySide6.QtGui import (
     QColor, QPainter, QPolygonF, QSyntaxHighlighter, QTextCharFormat,
-    QFont,
+    QFont, QTextCursor,
 )
 
 from src.ui.styles import CONSOLE_STYLE, STYLE_FOLD_BTN_LEFT, STYLE_FOLD_BTN_RIGHT
@@ -153,9 +155,11 @@ class DebugConsole(QWidget):
     EXPANDED_HEIGHT = 200
     ANIM_DURATION = 180
     DRAG_COLLAPSE_THRESHOLD = 50
+    MAX_LOG_BLOCKS = 500
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setFocusPolicy(Qt.StrongFocus)
         self.setMinimumHeight(0)
         self.setMaximumHeight(0)
         
@@ -177,7 +181,11 @@ class DebugConsole(QWidget):
         self._target_visible = False
         self._render_suspend_count = 0
         self._pending_raw_logs = []
+        self._pending_parsed_logs = []
         self._pending_debug_logs = []
+        self._raw_log_history = deque(maxlen=self.MAX_LOG_BLOCKS)
+        self._parsed_log_history = deque(maxlen=self.MAX_LOG_BLOCKS)
+        self._left_panel_mode = "raw"
         self._interaction_suspend_count = 0
         self._reset_layout_on_next_show = False
         self._log_flush_timer = QTimer(self)
@@ -196,12 +204,13 @@ class DebugConsole(QWidget):
         self.raw_data_console.setCenterOnScroll(False)
         self.raw_data_console.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.raw_data_console.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.raw_data_console.document().setMaximumBlockCount(500)
-        self.raw_data_console.setPlaceholderText("原始数据日志...")
+        self.raw_data_console.document().setMaximumBlockCount(self.MAX_LOG_BLOCKS)
+        self.raw_data_console.setPlaceholderText("原始报文日志...")
         self.raw_data_console.setStyleSheet(CONSOLE_STYLE)
         self.raw_data_highlighter = ConsoleHighlighter(
             self.raw_data_console.document(), "raw",
         )
+        self.raw_data_console.installEventFilter(self)
 
         self.debug_info_console = QPlainTextEdit()
         self.debug_info_console.setReadOnly(True)
@@ -209,12 +218,13 @@ class DebugConsole(QWidget):
         self.debug_info_console.setCenterOnScroll(False)
         self.debug_info_console.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.debug_info_console.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.debug_info_console.document().setMaximumBlockCount(500)
+        self.debug_info_console.document().setMaximumBlockCount(self.MAX_LOG_BLOCKS)
         self.debug_info_console.setPlaceholderText("调试信息与姿态处理日志...")
         self.debug_info_console.setStyleSheet(CONSOLE_STYLE)
         self.debug_info_highlighter = ConsoleHighlighter(
             self.debug_info_console.document(), "debug",
         )
+        self.debug_info_console.installEventFilter(self)
 
         self.left_wrapper = QWidget()
         left_layout = QVBoxLayout(self.left_wrapper)
@@ -272,6 +282,10 @@ class DebugConsole(QWidget):
         self._splitter_anim.finished.connect(self._on_splitter_anim_finished)
         self.splitter.splitterMoved.connect(self._on_splitter_moved)
 
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.btn_fold_left.setGeometry(0, 0, 30, self.height())
@@ -313,7 +327,10 @@ class DebugConsole(QWidget):
         if not self._target_visible:
             self.hide()
             self._pending_raw_logs.clear()
+            self._pending_parsed_logs.clear()
             self._pending_debug_logs.clear()
+            self._raw_log_history.clear()
+            self._parsed_log_history.clear()
             self._log_flush_timer.stop()
             self.raw_data_console.clear()
             self.debug_info_console.clear()
@@ -508,18 +525,78 @@ class DebugConsole(QWidget):
         if not self._log_flush_timer.isActive():
             self._log_flush_timer.start()
 
+    def _left_panel_placeholder(self):
+        if self._left_panel_mode == "parsed":
+            return "解析数据日志...  按 A 切换为原始报文"
+        return "原始报文日志...  按 A 切换为解析数据"
+
+    def _update_left_panel_placeholder(self):
+        self.raw_data_console.setPlaceholderText(self._left_panel_placeholder())
+
+    def _can_toggle_left_panel_mode(self):
+        return self.isVisible() and self._target_visible and not self.left_collapsed
+
+    def _render_left_panel_history(self):
+        history = (
+            self._parsed_log_history
+            if self._left_panel_mode == "parsed"
+            else self._raw_log_history
+        )
+        self.raw_data_console.setPlainText("\n".join(history))
+        cursor = self.raw_data_console.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.raw_data_console.setTextCursor(cursor)
+        self.raw_data_console.ensureCursorVisible()
+        self._update_left_panel_placeholder()
+
+    def toggle_left_panel_log_mode(self):
+        if not self._can_toggle_left_panel_mode():
+            return False
+        self._left_panel_mode = "parsed" if self._left_panel_mode == "raw" else "raw"
+        self._render_left_panel_history()
+        return True
+
+    def scroll_logs_to_bottom(self):
+        if not self.isVisible() or not self._target_visible:
+            return False
+
+        for console, collapsed in (
+            (self.raw_data_console, self.left_collapsed),
+            (self.debug_info_console, self.right_collapsed),
+        ):
+            if collapsed:
+                continue
+            cursor = console.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            console.setTextCursor(cursor)
+            console.ensureCursorVisible()
+        return True
+
     def _flush_pending_logs(self):
         if not self._target_visible:
             self._pending_raw_logs.clear()
+            self._pending_parsed_logs.clear()
             self._pending_debug_logs.clear()
             return
         if self._render_suspend_count > 0:
-            if self._pending_raw_logs or self._pending_debug_logs:
+            if (
+                self._pending_raw_logs
+                or self._pending_parsed_logs
+                or self._pending_debug_logs
+            ):
                 self._schedule_log_flush()
             return
-        if self._pending_raw_logs and self.isVisible() and not self.left_collapsed:
-            self.raw_data_console.appendPlainText("\n".join(self._pending_raw_logs))
+        if self._pending_raw_logs:
+            self._raw_log_history.extend(self._pending_raw_logs)
+        if self._pending_parsed_logs:
+            self._parsed_log_history.extend(self._pending_parsed_logs)
+        if self.isVisible() and not self.left_collapsed:
+            if self._left_panel_mode == "raw" and self._pending_raw_logs:
+                self.raw_data_console.appendPlainText("\n".join(self._pending_raw_logs))
+            elif self._left_panel_mode == "parsed" and self._pending_parsed_logs:
+                self.raw_data_console.appendPlainText("\n".join(self._pending_parsed_logs))
         self._pending_raw_logs.clear()
+        self._pending_parsed_logs.clear()
         if self._pending_debug_logs and self.isVisible() and not self.right_collapsed:
             self.debug_info_console.appendPlainText("\n".join(self._pending_debug_logs))
         self._pending_debug_logs.clear()
@@ -615,16 +692,44 @@ class DebugConsole(QWidget):
             self._reset_layout_on_next_show = True
             self.all_collapsed.emit()
 
+    def eventFilter(self, obj, event):
+        if event.type() != QEvent.KeyPress or event.isAutoRepeat():
+            return super().eventFilter(obj, event)
+
+        focus_widget = QApplication.focusWidget()
+        if focus_widget is None or not self.isAncestorOf(focus_widget):
+            return super().eventFilter(obj, event)
+
+        if event.key() == Qt.Key_A and self._can_toggle_left_panel_mode():
+            if self.toggle_left_panel_log_mode():
+                event.accept()
+                return True
+
+        if event.key() == Qt.Key_D and self.isVisible() and self._target_visible:
+            if self.scroll_logs_to_bottom():
+                event.accept()
+                return True
+
+        return super().eventFilter(obj, event)
+
     def on_raw_data_received(self, source, raw_text):
         """处理原始数据日志。"""
         if not self.isVisible() or not self._target_visible or self.left_collapsed:
             return
 
         timestamp = time.strftime("%H:%M:%S", time.localtime(time.time()))
-        source_color = "#4dabf7" if source == "udp" else "#69db7c"
-
         line_text = f"[{timestamp}] [{source.upper()}] {raw_text}"
         self._pending_raw_logs.append(line_text)
+        self._schedule_log_flush()
+
+    def on_parsed_data_received(self, source, parsed_text):
+        """处理解析数据日志。"""
+        if not self.isVisible() or not self._target_visible or self.left_collapsed:
+            return
+
+        timestamp = time.strftime("%H:%M:%S", time.localtime(time.time()))
+        line_text = f"[{timestamp}] [{source.upper()}] {parsed_text}"
+        self._pending_parsed_logs.append(line_text)
         self._schedule_log_flush()
 
     def on_pose_log(self, message):

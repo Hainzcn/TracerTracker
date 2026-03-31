@@ -16,6 +16,7 @@ class DataReceiver(QObject):
     """
     data_received = Signal(str, str, list)
     raw_data_received = Signal(str, str)
+    parsed_data_received = Signal(str, str)
     serial_stopped = Signal()
 
     def __init__(self, config_loader):
@@ -263,7 +264,7 @@ class DataReceiver(QObject):
 
                     snapshots = parser.feed(raw)
                     for snap in snapshots:
-                        self.raw_data_received.emit(
+                        self.parsed_data_received.emit(
                             "serial",
                             MS901MStreamParser.format_debug(snap)
                         )

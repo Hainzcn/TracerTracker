@@ -77,6 +77,7 @@ class Viewer3D(gl.GLViewWidget):
         self.long_press_timer.setSingleShot(True)
         self.long_press_timer.timeout.connect(self.on_long_press_timeout)
         self.is_long_press = False
+        self._middle_dragging = False
 
         self.animation_timer = QTimer(self)
         self.animation_timer.timeout.connect(self.update_animation)
@@ -148,10 +149,11 @@ class Viewer3D(gl.GLViewWidget):
 
     def mousePressEvent(self, ev):
         self.setFocus()
-        self.mousePos = ev.pos()
+        self.mousePos = ev.position().toPoint()
 
         if ev.button() == Qt.MouseButton.MiddleButton:
             self.is_long_press = False
+            self._middle_dragging = False
             self.long_press_timer.start(1000)
             ev.accept()
             return
@@ -168,9 +170,10 @@ class Viewer3D(gl.GLViewWidget):
         if ev.button() == Qt.MouseButton.MiddleButton:
             if self.long_press_timer.isActive():
                 self.long_press_timer.stop()
-                if not self.is_long_press:
+                if not self.is_long_press and not self._middle_dragging:
                     self.start_reset_animation(full_reset=False)
             self.is_long_press = False
+            self._middle_dragging = False
             ev.accept()
         else:
             super().mouseReleaseEvent(ev)
@@ -187,19 +190,29 @@ class Viewer3D(gl.GLViewWidget):
             super().keyPressEvent(ev)
 
     def mouseMoveEvent(self, ev):
-        diff = ev.pos() - self.mousePos
-        self.mousePos = ev.pos()
+        current_pos = ev.position().toPoint()
+        diff_x = current_pos.x() - self.mousePos.x()
+        diff_y = current_pos.y() - self.mousePos.y()
+        self.mousePos = current_pos
+
+        if ev.buttons() == Qt.MouseButton.MiddleButton:
+            if diff_x != 0 or diff_y != 0:
+                self._middle_dragging = True
+                if self.long_press_timer.isActive():
+                    self.long_press_timer.stop()
+            ev.accept()
+            return
 
         if ev.buttons() == Qt.MouseButton.LeftButton:
-            self.orbit(diff.x(), diff.y())
+            self.orbit(diff_x, diff_y)
             self.update_coordinate_system()
             self.camera_changed.emit()
 
         elif ev.buttons() == Qt.MouseButton.RightButton:
             dist = self.cameraParams()['distance']
             scale = dist * 0.001
-            self.pan_offset.setX(self.pan_offset.x() + diff.x() * scale)
-            self.pan_offset.setY(self.pan_offset.y() - diff.y() * scale)
+            self.pan_offset.setX(self.pan_offset.x() + diff_x * scale)
+            self.pan_offset.setY(self.pan_offset.y() - diff_y * scale)
             self.update()
 
         else:
