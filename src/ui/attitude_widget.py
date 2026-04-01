@@ -121,42 +121,40 @@ class AttitudeWidget(QWidget):
         labels[2].setText(f"Y:{yaw:+6.1f}\u00b0")
 
     def reset(self):
-        """清除所有姿态数据并隐藏小部件。"""
+        """清除所有姿态数据，但不改动外部控制的显隐状态。"""
         self._has_data = False
-        self.setVisible(False)
         for labels in (self.labels_raw, self.labels_madgwick, self.labels_mahony):
             labels[0].setText("R:   --")
             labels[1].setText("P:   --")
             labels[2].setText("Y:   --")
 
-    def _ensure_visible(self):
+    def _mark_has_data(self):
         if not self._has_data:
             self._has_data = True
-            self.setVisible(True)
 
     def update_quaternion(self, q0, q1, q2, q3):
         """原生四元数 -- 旋转第一个立方体，显示姿态角。"""
-        self._ensure_visible()
+        self._mark_has_data()
         self.cube_raw.set_rotation_quaternion(q0, q1, q2, q3)
         r, p, y = _quat_to_euler(q0, q1, q2, q3)
         self._set_euler_labels(self.labels_raw, r, p, y)
 
     def update_euler(self, roll, pitch, yaw):
         """原生欧拉角 -- 旋转第一个立方体，显示姿态角。"""
-        self._ensure_visible()
+        self._mark_has_data()
         self.cube_raw.set_rotation_euler(roll, pitch, yaw)
         self._set_euler_labels(self.labels_raw, roll, pitch, yaw)
 
     def update_madgwick_quaternion(self, q0, q1, q2, q3):
         """Madgwick 滤波器四元数 -- 旋转第二个立方体，显示姿态角。"""
-        self._ensure_visible()
+        self._mark_has_data()
         self.cube_madgwick.set_rotation_quaternion(q0, q1, q2, q3)
         r, p, y = _quat_to_euler(q0, q1, q2, q3)
         self._set_euler_labels(self.labels_madgwick, r, p, y)
 
     def update_mahony_quaternion(self, q0, q1, q2, q3):
         """Mahony 滤波器四元数 -- 旋转第三个立方体，显示姿态角。"""
-        self._ensure_visible()
+        self._mark_has_data()
         self.cube_mahony.set_rotation_quaternion(q0, q1, q2, q3)
         r, p, y = _quat_to_euler(q0, q1, q2, q3)
         self._set_euler_labels(self.labels_mahony, r, p, y)

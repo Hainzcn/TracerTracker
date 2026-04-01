@@ -12,7 +12,11 @@ from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QLabel, QHBoxLayout, QSizePolicy,
     QCheckBox, QSpinBox, QPushButton,
 )
-from PySide6.QtCore import QTimer, Qt, QEvent
+from PySide6.QtCore import (
+    QAbstractAnimation, QEvent, QEasingCurve, QPropertyAnimation,
+    QPoint, QTimer, Qt, Signal, QVariantAnimation,
+)
+from PySide6.QtGui import QColor, QPainter
 
 from src.ui.styles import (
     STYLE_CHECKBOX, STYLE_SPINBOX, STATUS_LABEL_STYLE,
@@ -32,7 +36,113 @@ from src.ins import PoseProcessor
 logger = logging.getLogger(__name__)
 
 
+class AttitudePanelHotZone(QWidget):
+    """贴在 Viewer 左侧的透明交互热区。"""
+
+    clicked = Signal()
+    VISIBLE_WIDTH = 10
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self._bg_alpha = 0.0
+        self._strip_progress = 0.0
+        self._pressed = False
+        self._hover_anim = QVariantAnimation(self)
+        self._hover_anim.setDuration(140)
+        self._hover_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._hover_anim.valueChanged.connect(self._on_anim_value_changed)
+        self._strip_anim = QVariantAnimation(self)
+        self._strip_anim.setDuration(160)
+        self._strip_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._strip_anim.valueChanged.connect(self._on_strip_anim_value_changed)
+
+    def _on_anim_value_changed(self, value):
+        self._bg_alpha = float(value)
+        self.update()
+
+    def _on_strip_anim_value_changed(self, value):
+        self._strip_progress = float(value)
+        self.update()
+
+    def _animate_bg(self, target_alpha):
+        self._hover_anim.stop()
+        self._hover_anim.setStartValue(self._bg_alpha)
+        self._hover_anim.setEndValue(float(target_alpha))
+        self._hover_anim.start()
+
+    def _animate_strip(self, target_progress):
+        self._strip_anim.stop()
+        self._strip_anim.setStartValue(self._strip_progress)
+        self._strip_anim.setEndValue(float(target_progress))
+        self._strip_anim.start()
+
+    def enterEvent(self, event):
+        self._animate_bg(128.0)
+        self._animate_strip(1.0)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._pressed = False
+        self._animate_bg(0.0)
+        self._animate_strip(0.0)
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pressed = True
+            self._animate_bg(156.0)
+            event.accept()
+            return
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            inside = self.rect().contains(event.position().toPoint())
+            self._pressed = False
+            self._animate_bg(128.0 if inside else 0.0)
+            if inside:
+                self.clicked.emit()
+                event.accept()
+                return
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        event.accept()
+
+    def wheelEvent(self, event):
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event):
+        event.accept()
+
+    def paintEvent(self, event):
+        if self._bg_alpha <= 0.0 or self._strip_progress <= 0.0:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        fill = QColor(220, 220, 220, int(self._bg_alpha))
+        visible_width = max(
+            1,
+            min(
+                self.VISIBLE_WIDTH,
+                int(round(self.VISIBLE_WIDTH * self._strip_progress)),
+            ),
+        )
+        painter.fillRect(0, 0, visible_width, self.height(), fill)
+        painter.end()
+        super().paintEvent(event)
+
+
 class MainWindow(QMainWindow):
+    ATTITUDE_PANEL_MARGIN = 10
+    ATTITUDE_HOTZONE_WIDTH = 10
+    ATTITUDE_HOTZONE_HIT_PADDING_RIGHT = 10
+    ATTITUDE_PANEL_ANIM_MS = 180
+
     def __init__(self):
         super().__init__()
 
@@ -73,6 +183,20 @@ class MainWindow(QMainWindow):
 
         # 叠加部件（浮动在 3D 场景之上）
         self.attitude_widget = AttitudeWidget(self.viewer)
+        self.attitude_hotzone = AttitudePanelHotZone(self.viewer)
+        self.attitude_hotzone.setFixedWidth(
+            self.ATTITUDE_HOTZONE_WIDTH + self.ATTITUDE_HOTZONE_HIT_PADDING_RIGHT,
+        )
+        self.attitude_hotzone.clicked.connect(self.toggle_attitude_panel)
+        self._attitude_panel_expanded = False
+        self._attitude_panel_anim = QPropertyAnimation(
+            self.attitude_widget, b"pos", self,
+        )
+        self._attitude_panel_anim.setDuration(self.ATTITUDE_PANEL_ANIM_MS)
+        self._attitude_panel_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._attitude_panel_anim.finished.connect(
+            self._on_attitude_panel_anim_finished,
+        )
         self.sensor_overlay = SensorInfoOverlay(self.viewer)
         self.pose_processor.velocity_updated.connect(
             self.sensor_overlay.update_velocity,
@@ -139,6 +263,67 @@ class MainWindow(QMainWindow):
         self.last_serial_time = 0
         self.viewer.set_trail_length(self.trail_length_spinbox.value())
         QTimer.singleShot(0, self._reposition_overlays)
+
+    def _attitude_visible_pos(self):
+        return QPoint(
+            self.ATTITUDE_PANEL_MARGIN,
+            self.ATTITUDE_PANEL_MARGIN,
+        )
+
+    def _attitude_hidden_pos(self):
+        visible_pos = self._attitude_visible_pos()
+        return QPoint(-self.attitude_widget.width(), visible_pos.y())
+
+    def _sync_attitude_overlay_geometry(self):
+        top = self.ATTITUDE_PANEL_MARGIN
+        self.attitude_hotzone.setGeometry(
+            0,
+            top,
+            self.ATTITUDE_HOTZONE_WIDTH + self.ATTITUDE_HOTZONE_HIT_PADDING_RIGHT,
+            self.attitude_widget.height(),
+        )
+
+        if self._attitude_panel_anim.state() == QAbstractAnimation.Running:
+            current = self.attitude_widget.pos()
+            self.attitude_widget.move(current.x(), top)
+        else:
+            target = (
+                self._attitude_visible_pos()
+                if self._attitude_panel_expanded
+                else self._attitude_hidden_pos()
+            )
+            self.attitude_widget.move(target)
+            self.attitude_widget.setVisible(self._attitude_panel_expanded)
+
+        if self.attitude_widget.isVisible():
+            self.attitude_widget.raise_()
+        self.attitude_hotzone.raise_()
+
+    def toggle_attitude_panel(self):
+        hidden_pos = self._attitude_hidden_pos()
+        visible_pos = self._attitude_visible_pos()
+
+        if self._attitude_panel_anim.state() == QAbstractAnimation.Running:
+            current = self.attitude_widget.pos()
+            self._attitude_panel_anim.stop()
+        elif self.attitude_widget.isVisible():
+            current = self.attitude_widget.pos()
+        else:
+            current = hidden_pos
+            self.attitude_widget.move(current)
+
+        self._attitude_panel_expanded = not self._attitude_panel_expanded
+        target = visible_pos if self._attitude_panel_expanded else hidden_pos
+
+        self.attitude_widget.setVisible(True)
+        self.attitude_widget.raise_()
+        self.attitude_hotzone.raise_()
+        self._attitude_panel_anim.setStartValue(current)
+        self._attitude_panel_anim.setEndValue(target)
+        self._attitude_panel_anim.start()
+
+    def _on_attitude_panel_anim_finished(self):
+        self._sync_attitude_overlay_geometry()
 
     # ── Status bar ───────────────────────────────────────────────────
 
@@ -256,6 +441,7 @@ class MainWindow(QMainWindow):
         self.attitude_widget.reset()
         self.sensor_overlay.reset()
         self.pose_processor.reset()
+        self._sync_attitude_overlay_geometry()
 
     def on_data_received(self, source, prefix, data):
         current_time = time.time()
@@ -340,9 +526,8 @@ class MainWindow(QMainWindow):
     def _reposition_overlays(self):
         vw = self.viewer.width()
         vh = self.viewer.height()
-        margin = 10
-        aw = self.attitude_widget
-        aw.move(margin, margin)
+        margin = self.ATTITUDE_PANEL_MARGIN
+        self._sync_attitude_overlay_geometry()
         so = self.sensor_overlay
         so.adjustSize()
         so.move(vw - so.width() - margin, vh - so.height() - margin)
