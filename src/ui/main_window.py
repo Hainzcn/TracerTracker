@@ -27,6 +27,7 @@ from src.ui.viewer_3d import Viewer3D
 from src.ui.toolbar import ToolBar
 from src.ui.debug_console import DebugConsole
 from src.ui.attitude_widget import AttitudeWidget
+from src.ui.sensor_chart_panel import SensorChartPanel
 from src.ui.sensor_info_overlay import SensorInfoOverlay
 from src.ui.view_gizmo import ViewOrientationGizmo
 from src.utils.config_loader import ConfigLoader
@@ -139,6 +140,7 @@ class AttitudePanelHotZone(QWidget):
 
 class MainWindow(QMainWindow):
     ATTITUDE_PANEL_MARGIN = 10
+    CHART_PANEL_SPACING = 10
     ATTITUDE_HOTZONE_WIDTH = 10
     ATTITUDE_HOTZONE_HIT_PADDING_RIGHT = 10
     ATTITUDE_PANEL_ANIM_MS = 180
@@ -183,12 +185,19 @@ class MainWindow(QMainWindow):
 
         # 叠加部件（浮动在 3D 场景之上）
         self.attitude_widget = AttitudeWidget(self.viewer)
+        self.sensor_chart_panel = SensorChartPanel(self.viewer)
         self.attitude_hotzone = AttitudePanelHotZone(self.viewer)
         self.attitude_hotzone.setFixedWidth(
             self.ATTITUDE_HOTZONE_WIDTH + self.ATTITUDE_HOTZONE_HIT_PADDING_RIGHT,
         )
         self.attitude_hotzone.clicked.connect(self.toggle_attitude_panel)
+        self.sensor_chart_hotzone = AttitudePanelHotZone(self.viewer)
+        self.sensor_chart_hotzone.setFixedWidth(
+            self.ATTITUDE_HOTZONE_WIDTH + self.ATTITUDE_HOTZONE_HIT_PADDING_RIGHT,
+        )
+        self.sensor_chart_hotzone.clicked.connect(self.toggle_sensor_chart_panel)
         self._attitude_panel_expanded = False
+        self._sensor_chart_panel_expanded = False
         self._attitude_panel_anim = QPropertyAnimation(
             self.attitude_widget, b"pos", self,
         )
@@ -196,6 +205,14 @@ class MainWindow(QMainWindow):
         self._attitude_panel_anim.setEasingCurve(QEasingCurve.OutCubic)
         self._attitude_panel_anim.finished.connect(
             self._on_attitude_panel_anim_finished,
+        )
+        self._sensor_chart_panel_anim = QPropertyAnimation(
+            self.sensor_chart_panel, b"pos", self,
+        )
+        self._sensor_chart_panel_anim.setDuration(self.ATTITUDE_PANEL_ANIM_MS)
+        self._sensor_chart_panel_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._sensor_chart_panel_anim.finished.connect(
+            self._on_sensor_chart_panel_anim_finished,
         )
         self.sensor_overlay = SensorInfoOverlay(self.viewer)
         self.pose_processor.velocity_updated.connect(
@@ -274,6 +291,17 @@ class MainWindow(QMainWindow):
         visible_pos = self._attitude_visible_pos()
         return QPoint(-self.attitude_widget.width(), visible_pos.y())
 
+    def _chart_visible_pos(self):
+        return QPoint(
+            self.ATTITUDE_PANEL_MARGIN + AttitudeWidget.content_margins()[0],
+            self.ATTITUDE_PANEL_MARGIN + self.attitude_widget.height()
+            + self.CHART_PANEL_SPACING,
+        )
+
+    def _chart_hidden_pos(self):
+        visible_pos = self._chart_visible_pos()
+        return QPoint(-self.sensor_chart_panel.width(), visible_pos.y())
+
     def _sync_attitude_overlay_geometry(self):
         top = self.ATTITUDE_PANEL_MARGIN
         self.attitude_hotzone.setGeometry(
@@ -324,6 +352,57 @@ class MainWindow(QMainWindow):
 
     def _on_attitude_panel_anim_finished(self):
         self._sync_attitude_overlay_geometry()
+
+    def _sync_sensor_chart_geometry(self):
+        top = self._chart_visible_pos().y()
+        self.sensor_chart_hotzone.setGeometry(
+            0,
+            top,
+            self.ATTITUDE_HOTZONE_WIDTH + self.ATTITUDE_HOTZONE_HIT_PADDING_RIGHT,
+            self.sensor_chart_panel.height(),
+        )
+
+        if self._sensor_chart_panel_anim.state() == QAbstractAnimation.Running:
+            current = self.sensor_chart_panel.pos()
+            self.sensor_chart_panel.move(current.x(), top)
+        else:
+            target = (
+                self._chart_visible_pos()
+                if self._sensor_chart_panel_expanded
+                else self._chart_hidden_pos()
+            )
+            self.sensor_chart_panel.move(target)
+            self.sensor_chart_panel.setVisible(self._sensor_chart_panel_expanded)
+
+        if self.sensor_chart_panel.isVisible():
+            self.sensor_chart_panel.raise_()
+        self.sensor_chart_hotzone.raise_()
+
+    def toggle_sensor_chart_panel(self):
+        hidden_pos = self._chart_hidden_pos()
+        visible_pos = self._chart_visible_pos()
+
+        if self._sensor_chart_panel_anim.state() == QAbstractAnimation.Running:
+            current = self.sensor_chart_panel.pos()
+            self._sensor_chart_panel_anim.stop()
+        elif self.sensor_chart_panel.isVisible():
+            current = self.sensor_chart_panel.pos()
+        else:
+            current = hidden_pos
+            self.sensor_chart_panel.move(current)
+
+        self._sensor_chart_panel_expanded = not self._sensor_chart_panel_expanded
+        target = visible_pos if self._sensor_chart_panel_expanded else hidden_pos
+
+        self.sensor_chart_panel.setVisible(True)
+        self.sensor_chart_panel.raise_()
+        self.sensor_chart_hotzone.raise_()
+        self._sensor_chart_panel_anim.setStartValue(current)
+        self._sensor_chart_panel_anim.setEndValue(target)
+        self._sensor_chart_panel_anim.start()
+
+    def _on_sensor_chart_panel_anim_finished(self):
+        self._sync_sensor_chart_geometry()
 
     # ── Status bar ───────────────────────────────────────────────────
 
@@ -436,18 +515,48 @@ class MainWindow(QMainWindow):
                 pressure=data[17], altitude=data[18],
             )
 
+    def _update_sensor_charts(self, data):
+        acceleration = None
+        euler = None
+        pressure = None
+        altitude = None
+
+        if len(data) >= 3:
+            acceleration = (data[0], data[1], data[2])
+
+        if self._has_quaternion_point and len(data) >= 10:
+            euler = AttitudeWidget.quaternion_to_euler(
+                data[6], data[7], data[8], data[9],
+            )
+        elif len(data) >= 17:
+            euler = (data[14], data[15], data[16])
+
+        if len(data) >= 19:
+            pressure = data[17]
+            altitude = data[18]
+
+        self.sensor_chart_panel.push_snapshot(
+            acceleration=acceleration,
+            euler=euler,
+            pressure=pressure,
+            altitude=altitude,
+        )
+
     def _clear_scene(self):
         self.viewer.clear_all()
         self.attitude_widget.reset()
+        self.sensor_chart_panel.reset()
         self.sensor_overlay.reset()
         self.pose_processor.reset()
         self._sync_attitude_overlay_geometry()
+        self._sync_sensor_chart_geometry()
 
     def on_data_received(self, source, prefix, data):
         current_time = time.time()
 
         self.pose_processor.process(source, prefix, data)
         self._update_overlays(data)
+        self._update_sensor_charts(data)
 
         status_text = f"接收中 ({len(data)} 个值)"
         if prefix:
@@ -528,6 +637,7 @@ class MainWindow(QMainWindow):
         vh = self.viewer.height()
         margin = self.ATTITUDE_PANEL_MARGIN
         self._sync_attitude_overlay_geometry()
+        self._sync_sensor_chart_geometry()
         so = self.sensor_overlay
         so.adjustSize()
         so.move(vw - so.width() - margin, vh - so.height() - margin)

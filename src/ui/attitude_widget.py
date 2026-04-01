@@ -31,6 +31,7 @@ class AttitudeWidget(QWidget):
     _CUBE_SIZE = 90
     _ANGLE_COL_WIDTH = 80
     _WIDGET_WIDTH = _ANGLE_COL_WIDTH + _CUBE_SIZE + 10
+    _CONTENT_MARGINS = (4, 2, 4, 2)
 
     _ANGLE_FONT = "font-family: Consolas, monospace; font-size: 13px;"
     _ANGLE_COMMON = "background: transparent; padding: 0px; margin: 0px;"
@@ -54,7 +55,7 @@ class AttitudeWidget(QWidget):
         )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setContentsMargins(*self._CONTENT_MARGINS)
         layout.setSpacing(0)
 
         self.cube_raw, self.labels_raw = self._add_cube_group(layout, "Raw")
@@ -67,6 +68,22 @@ class AttitudeWidget(QWidget):
 
         self._has_data = False
         self.setVisible(False)
+
+    @classmethod
+    def cube_panel_width(cls):
+        return cls._CUBE_SIZE
+
+    @classmethod
+    def total_panel_width(cls):
+        return cls._WIDGET_WIDTH
+
+    @classmethod
+    def content_margins(cls):
+        return cls._CONTENT_MARGINS
+
+    @staticmethod
+    def quaternion_to_euler(q0, q1, q2, q3):
+        return _quat_to_euler(q0, q1, q2, q3)
 
     def _add_cube_group(self, parent_layout, title_text):
         row = QHBoxLayout()
