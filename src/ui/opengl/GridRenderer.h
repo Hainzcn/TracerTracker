@@ -41,7 +41,6 @@ private:
     std::vector<Vertex> m_lineVerts;
     std::vector<Vertex> m_triVerts;
 
-    // cached parameters to avoid redundant rebuilds
     double m_lastDistance   = -1.0;
     double m_lastScale      = -1.0;
     double m_lastElevation  = -1000.0;
@@ -93,6 +92,7 @@ private:
                         float baseR, float baseG, float baseB, float baseA);
 
     void buildAxisLines();
+    void buildAxisQuads();
     void buildArrowBillboards();
     void buildTickLines();
 

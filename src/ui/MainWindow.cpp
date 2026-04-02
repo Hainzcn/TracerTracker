@@ -494,9 +494,7 @@ void MainWindow::onDataReceived(const QString& source, const QString& prefix,
     auto& cfg2 = ConfigLoader::instance();
     auto pointCfgs = cfg2.getPoints();
     for (const auto& pc : pointCfgs) {
-        // 跳过纯传感器用途的点
-        if (pc.purpose == "accelerometer" || pc.purpose == "gyroscope"
-            || pc.purpose == "magnetic_field") continue;
+        if (!pc.purpose.isEmpty() && pc.purpose != "position") continue;
 
         if (pc.source != "any" && pc.source != source) continue;
 

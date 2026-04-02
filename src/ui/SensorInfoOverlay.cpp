@@ -8,11 +8,17 @@
 // SensorInfoOverlay.cpp — 传感器信息叠加层实现
 // ============================================================
 
+static QString signedFixed(double v, int width, int decimals) {
+    QChar sign = (v < 0.0) ? QChar('-') : QChar('+');
+    QString num = QString::number(std::abs(v), 'f', decimals);
+    while (num.length() < width - 1) num.prepend(' ');
+    return sign + num;
+}
+
 SensorInfoOverlay::SensorInfoOverlay(QWidget* parent)
     : QWidget(parent)
 {
     setFixedWidth(300);
-    // 半透明圆角背景
     setStyleSheet(
         "SensorInfoOverlay {"
         "  background-color: rgba(30, 30, 30, 200);"
@@ -26,7 +32,6 @@ SensorInfoOverlay::SensorInfoOverlay(QWidget* parent)
     layout->setHorizontalSpacing(8);
     layout->setVerticalSpacing(4);
 
-    // 标题列样式（灰色小号粗体）
     const QString titleStyle =
         "QLabel {"
         "  color: #888888;"
@@ -36,7 +41,6 @@ SensorInfoOverlay::SensorInfoOverlay(QWidget* parent)
         "  background: transparent;"
         "}";
 
-    // 数值列样式（浅色等宽字体）
     const QString valueStyle =
         "QLabel {"
         "  color: #e0e0e0;"
@@ -88,7 +92,6 @@ void SensorInfoOverlay::reset() {
     setVisible(false);
 }
 
-// 更新加速度（三轴 RGB 配色）
 void SensorInfoOverlay::updateAcceleration(double ax, double ay, double az) {
     if (!m_hasData) {
         m_hasData = true;
@@ -99,24 +102,22 @@ void SensorInfoOverlay::updateAcceleration(double ax, double ay, double az) {
         "<span style='color:#69db7c'>%2</span> "
         "<span style='color:#4dabf7'>%3</span> "
         "<span style='color:#888'>m/s\u00b2</span>"
-    ).arg(ax, 8, 'f', 2, ' ')
-     .arg(ay, 8, 'f', 2, ' ')
-     .arg(az, 8, 'f', 2, ' '));
+    ).arg(signedFixed(ax, 8, 2))
+     .arg(signedFixed(ay, 8, 2))
+     .arg(signedFixed(az, 8, 2)));
 }
 
-// 更新速度显示
 void SensorInfoOverlay::updateVelocity(double vx, double vy, double vz) {
     m_velLabel->setText(QString(
         "<span style='color:#ff6b6b'>%1</span> "
         "<span style='color:#69db7c'>%2</span> "
         "<span style='color:#4dabf7'>%3</span> "
         "<span style='color:#888'>m/s</span>"
-    ).arg(vx, 8, 'f', 3, ' ')
-     .arg(vy, 8, 'f', 3, ' ')
-     .arg(vz, 8, 'f', 3, ' '));
+    ).arg(signedFixed(vx, 8, 3))
+     .arg(signedFixed(vy, 8, 3))
+     .arg(signedFixed(vz, 8, 3)));
 }
 
-// 更新海拔变化（优先直接海拔值，回退气压公式）
 void SensorInfoOverlay::updateAltitude(std::optional<double> pressure,
                                         std::optional<double> altitude) {
     if (altitude.has_value() && altitude.value() != 0.0) {
@@ -126,7 +127,7 @@ void SensorInfoOverlay::updateAltitude(std::optional<double> pressure,
         m_altLabel->setText(QString(
             "<span style='color:#fcc419'>%1</span> "
             "<span style='color:#888'>m  (%2 m)</span>"
-        ).arg(delta, 8, 'f', 2, ' ')
+        ).arg(signedFixed(delta, 8, 2))
          .arg(h, 0, 'f', 1));
         return;
     }
@@ -137,7 +138,7 @@ void SensorInfoOverlay::updateAltitude(std::optional<double> pressure,
         m_altLabel->setText(QString(
             "<span style='color:#fcc419'>%1</span> "
             "<span style='color:#888'>m  (P=%2 Pa)</span>"
-        ).arg(h, 8, 'f', 2, ' ')
+        ).arg(signedFixed(h, 8, 2))
          .arg(p, 0, 'f', 0));
     }
 }

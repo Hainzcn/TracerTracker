@@ -25,7 +25,6 @@ class TrackRenderer;
 //   azimuth   - 方位角（度）
 //   center    - 目标中心点
 //   panOffset - 平移偏移（屏幕空间 XY）
-//   sceneScale- 场景整体缩放
 // ============================================================
 
 class Viewer3D : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
@@ -109,10 +108,13 @@ protected:
     void mouseMoveEvent(QMouseEvent* ev)    override;
     void wheelEvent(QWheelEvent* ev)        override;
     void keyPressEvent(QKeyEvent* ev)       override;
+    void keyReleaseEvent(QKeyEvent* ev)     override;
 
 private slots:
-    // 中键长按定时器超时槽（触发全复位动画）
-    void onLongPressTimeout();
+    // R 键长按 1 秒：恢复默认视角
+    void onResetViewTimeout();
+    // R 键长按 2 秒：恢复全部默认参数
+    void onResetAllTimeout();
 
     // 缩放平滑动画更新
     void updateZoomAnimation();
@@ -131,25 +133,25 @@ private:
     // ── 相机状态 ──────────────────────────────────────────────
 
     // 当前相机参数
-    double   m_distance   = 50.0;     // 相机到目标的距离
+    double   m_distance   = 35.0;     // 相机到目标的距离
     double   m_elevation  = 30.0;     // 仰角（度）
     double   m_azimuth    = -135.0;   // 方位角（度）
     QVector3D m_center    = {0,0,0};  // 目标中心
     float    m_panX       = 0.0f;     // 平移 X
     float    m_panY       = -5.0f;    // 平移 Y
-    float    m_sceneScale = 1.0f;     // 场景缩放
+    float    m_sceneScale = 1.0f;     // 场景缩放（围绕原点）
 
     // 初始相机状态（用于复位）
-    const double INIT_DISTANCE   = 80.0;
-    const double INIT_ELEVATION  = 30.0;
-    const double INIT_AZIMUTH    = -135.0;
-    const float  INIT_PAN_X      = 0.0f;
-    const float  INIT_PAN_Y      = -5.0f;
-    const float  INIT_SCENE_SCALE= 1.0f;
+    const double INIT_DISTANCE    = 35.0;
+    const double INIT_ELEVATION   = 30.0;
+    const double INIT_AZIMUTH     = -135.0;
+    const float  INIT_PAN_X       = 0.0f;
+    const float  INIT_PAN_Y       = -5.0f;
+    const float  INIT_SCENE_SCALE = 1.0f;
 
     // ── 动画状态 ──────────────────────────────────────────────
 
-    // 缩放动画
+    // 缩放动画（通过修改 sceneScale 实现，围绕原点缩放）
     float  m_targetSceneScale = 1.0f;
     QTimer m_zoomAnimTimer;
 
@@ -171,10 +173,12 @@ private:
     // ── 鼠标交互状态 ──────────────────────────────────────────
 
     QPoint m_lastMousePos;     // 上次鼠标位置
-    bool   m_middlePressed  = false;
-    bool   m_isLongPress    = false;
-    bool   m_middleDragging = false;
-    QTimer m_longPressTimer;
+
+    // ── R 键长按复位 ────────────────────────────────────────
+    bool   m_rKeyHeld          = false;
+    bool   m_resetViewFired    = false;  // 1 秒阈值已触发
+    QTimer m_resetViewTimer;             // 1 秒定时器
+    QTimer m_resetAllTimer;              // 2 秒定时器
 
     // ── 投影参数 ──────────────────────────────────────────────
 

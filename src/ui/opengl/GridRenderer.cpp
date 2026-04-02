@@ -352,6 +352,76 @@ void GridRenderer::buildAxisLines() {
     }
 }
 
+// ── axis quads (thick axis lines via triangle strips) ───────────
+
+void GridRenderer::buildAxisQuads() {
+    float halfW = m_axisLength * 0.004f;
+    float fadeStart = m_negExt * 0.5f;
+
+    struct AxisDef {
+        int idx;
+        float cr, cg, cb;
+    };
+    std::array<AxisDef, 3> axes = {{
+        {0, 1.0f, 0.0f, 0.0f},
+        {1, 0.0f, 1.0f, 0.0f},
+        {2, 0.0f, 0.0f, 1.0f},
+    }};
+
+    for (auto& ax : axes) {
+        QVector3D dir(0,0,0);
+        if (ax.idx == 0) dir.setX(1); else if (ax.idx == 1) dir.setY(1); else dir.setZ(1);
+
+        QVector3D w = QVector3D::crossProduct(dir, m_camDir);
+        float wl = w.length();
+        if (wl < 1e-6f) {
+            QVector3D fallback = (ax.idx == 0) ? QVector3D(0,1,0) : QVector3D(1,0,0);
+            w = QVector3D::crossProduct(dir, fallback);
+            wl = w.length();
+        }
+        if (wl > 1e-6f) w = w / wl;
+        w *= halfW;
+
+        QVector3D pNeg = dir * m_negExt;
+        QVector3D pFade = dir * fadeStart;
+        QVector3D pPos = dir * m_posExt;
+
+        RGBA cNeg = applySubmersion(
+            {ax.cr, ax.cg, ax.cb, 0.0f},
+            computeSubmersionFactor(pNeg, m_dominantPlane, m_planeWeights, m_camDir, m_axisLength));
+        RGBA cFade = applySubmersion(
+            {ax.cr, ax.cg, ax.cb, 1.0f},
+            computeSubmersionFactor(pFade, m_dominantPlane, m_planeWeights, m_camDir, m_axisLength));
+        RGBA cPos = applySubmersion(
+            {ax.cr, ax.cg, ax.cb, 1.0f},
+            computeSubmersionFactor(pPos, m_dominantPlane, m_planeWeights, m_camDir, m_axisLength));
+
+        // neg -> fade quad (alpha 0 -> 1)
+        QVector3D nA = pNeg - w, nB = pNeg + w;
+        QVector3D fA = pFade - w, fB = pFade + w;
+        addTri(nA, fA, nB, cNeg.r, cNeg.g, cNeg.b, cNeg.a);
+        addTri(nB, fA, fB, cNeg.r, cNeg.g, cNeg.b, cNeg.a);
+        // fix: use per-vertex color for gradient
+        m_triVerts[m_triVerts.size()-6] = {nA.x(), nA.y(), nA.z(), cNeg.r, cNeg.g, cNeg.b, cNeg.a};
+        m_triVerts[m_triVerts.size()-5] = {fA.x(), fA.y(), fA.z(), cFade.r, cFade.g, cFade.b, cFade.a};
+        m_triVerts[m_triVerts.size()-4] = {nB.x(), nB.y(), nB.z(), cNeg.r, cNeg.g, cNeg.b, cNeg.a};
+        m_triVerts[m_triVerts.size()-3] = {nB.x(), nB.y(), nB.z(), cNeg.r, cNeg.g, cNeg.b, cNeg.a};
+        m_triVerts[m_triVerts.size()-2] = {fA.x(), fA.y(), fA.z(), cFade.r, cFade.g, cFade.b, cFade.a};
+        m_triVerts[m_triVerts.size()-1] = {fB.x(), fB.y(), fB.z(), cFade.r, cFade.g, cFade.b, cFade.a};
+
+        // fade -> pos quad (full alpha)
+        QVector3D pA = pPos - w, pB = pPos + w;
+        addTri(fA, pA, fB, cFade.r, cFade.g, cFade.b, cFade.a);
+        addTri(fB, pA, pB, cFade.r, cFade.g, cFade.b, cFade.a);
+        m_triVerts[m_triVerts.size()-6] = {fA.x(), fA.y(), fA.z(), cFade.r, cFade.g, cFade.b, cFade.a};
+        m_triVerts[m_triVerts.size()-5] = {pA.x(), pA.y(), pA.z(), cPos.r, cPos.g, cPos.b, cPos.a};
+        m_triVerts[m_triVerts.size()-4] = {fB.x(), fB.y(), fB.z(), cFade.r, cFade.g, cFade.b, cFade.a};
+        m_triVerts[m_triVerts.size()-3] = {fB.x(), fB.y(), fB.z(), cFade.r, cFade.g, cFade.b, cFade.a};
+        m_triVerts[m_triVerts.size()-2] = {pA.x(), pA.y(), pA.z(), cPos.r, cPos.g, cPos.b, cPos.a};
+        m_triVerts[m_triVerts.size()-1] = {pB.x(), pB.y(), pB.z(), cPos.r, cPos.g, cPos.b, cPos.a};
+    }
+}
+
 // ── billboard arrow triangles ───────────────────────────────────
 
 void GridRenderer::buildArrowBillboards() {
@@ -434,8 +504,7 @@ void GridRenderer::rebuildGeometry(double distance, double sceneScale,
     m_lineVerts.clear();
     m_triVerts.clear();
 
-    // compute derived values
-    m_axisLength = float(distance) * AXIS_VISUAL_RATIO / float(sceneScale);
+    m_axisLength = float(distance) * AXIS_VISUAL_RATIO / std::max(float(sceneScale), 1e-9f);
     m_negExt = -m_axisLength * 0.5f;
     m_posExt = m_axisLength;
 
@@ -475,8 +544,8 @@ void GridRenderer::rebuildGeometry(double distance, double sceneScale,
         }
     }
 
-    // ── axis lines ──────────────────────────────────────────────
-    buildAxisLines();
+    // ── axis quads (thick lines via triangles) ────────────────────
+    buildAxisQuads();
 
     // ── arrow billboards ────────────────────────────────────────
     buildArrowBillboards();
@@ -492,15 +561,16 @@ void GridRenderer::update(double distance, double sceneScale,
                           float orthoBlend) {
     if (!m_initialized) return;
 
-    bool changed = (std::abs(distance  - m_lastDistance)  > distance * 0.02 ||
-                    std::abs(sceneScale - m_lastScale)     > 0.005 ||
+    double effScale = std::max(sceneScale, 1e-9);
+    bool changed = (std::abs(distance  - m_lastDistance)  > distance * 0.002 ||
+                    std::abs(effScale   - m_lastScale)     > m_lastScale * 0.002 ||
                     std::abs(elevation  - m_lastElevation) > 0.5  ||
                     std::abs(azimuth    - m_lastAzimuth)   > 0.5  ||
                     std::abs(orthoBlend - m_lastOrthoBlend) > 0.005);
     if (!changed) return;
 
     m_lastDistance   = distance;
-    m_lastScale      = sceneScale;
+    m_lastScale      = effScale;
     m_lastElevation  = elevation;
     m_lastAzimuth    = azimuth;
     m_lastOrthoBlend = orthoBlend;
@@ -566,38 +636,59 @@ void GridRenderer::renderLabels(QPainter* painter, const QMatrix4x4& mvpMatrix,
 
     // ── axis name labels (X, Y, Z) ─────────────────────────────
     float arrowLen = m_axisLength * 0.05f;
-    float labelOffset = m_posExt + arrowLen + m_axisLength * 0.06f;
+    float tipDist  = m_posExt + arrowLen;
 
     struct LabelDef {
         QString text;
-        QVector3D pos;
+        QVector3D tipPos;
+        QVector3D axisOrigin;
         QColor baseColor;
         float visibility;
     };
     std::array<LabelDef, 3> labels = {{
-        {"X", QVector3D(labelOffset, 0, 0), QColor(255, 0, 0, 255), m_axisLabelVis.x},
-        {"Y", QVector3D(0, labelOffset, 0), QColor(0, 255, 0, 255), m_axisLabelVis.y},
-        {"Z", QVector3D(0, 0, labelOffset), QColor(0, 0, 255, 255), m_axisLabelVis.z},
+        {"X", QVector3D(tipDist, 0, 0), QVector3D(0,0,0), QColor(255, 0, 0, 255), m_axisLabelVis.x},
+        {"Y", QVector3D(0, tipDist, 0), QVector3D(0,0,0), QColor(0, 255, 0, 255), m_axisLabelVis.y},
+        {"Z", QVector3D(0, 0, tipDist), QVector3D(0,0,0), QColor(0, 0, 255, 255), m_axisLabelVis.z},
     }};
 
     QFont labelFont("Arial", 13);
     painter->setFont(labelFont);
     QFontMetrics fm(labelFont);
+    float screenOffset = 16.0f;
+
     for (auto& lb : labels) {
-        float depth = computeSubmersionFactor(lb.pos, m_dominantPlane, m_planeWeights, m_camDir, m_axisLength);
+        float depth = computeSubmersionFactor(lb.tipPos, m_dominantPlane, m_planeWeights, m_camDir, m_axisLength);
         QColor c = applyVisibilityToColor(lb.baseColor, lb.visibility, depth);
         if (c.alpha() <= 0) continue;
-        QPointF sp = project(lb.pos);
-        if (sp.x() < -100 || sp.x() > viewportW + 100) continue;
+
+        QPointF spTip = project(lb.tipPos);
+        QPointF spOrg = project(lb.axisOrigin);
+        if (spTip.x() < -200 || spTip.x() > viewportW + 200) continue;
+
+        QPointF dir = spTip - spOrg;
+        double dirLen = std::sqrt(dir.x() * dir.x() + dir.y() * dir.y());
+
         QSize ts = fm.size(0, lb.text);
+        QPointF drawPos;
+        if (dirLen > 1.0) {
+            QPointF dirN(dir.x() / dirLen, dir.y() / dirLen);
+            QPointF labelCenter = spTip + dirN * screenOffset;
+            drawPos = labelCenter + QPointF(-ts.width() * 0.5, ts.height() * 0.35);
+        } else {
+            drawPos = spTip + QPointF(-ts.width() * 0.5, ts.height() * 0.35);
+        }
+
         painter->setPen(c);
-        painter->drawText(sp + QPointF(-ts.width() * 0.5, ts.height() * 0.35), lb.text);
+        painter->drawText(drawPos, lb.text);
     }
 
     // ── tick labels (three axes) ────────────────────────────────
-    painter->setFont(QFont("Arial", 9));
+    QFont tickFont("Arial", 13);
+    painter->setFont(tickFont);
+    QFontMetrics tfm(tickFont);
     QColor tickBaseColor(180, 180, 180, 200);
     float fadeStart = m_negExt * 0.5f;
+    float tickHalf = m_axisLength * TICK_LINE_LENGTH_RATIO;
 
     struct TickAxisDef { int mainAx; int perpA; float vis; };
     std::array<TickAxisDef, 3> tickAxes = {{
@@ -606,7 +697,9 @@ void GridRenderer::renderLabels(QPainter* painter, const QMatrix4x4& mvpMatrix,
         {2, 0, m_axisLabelVis.z},
     }};
 
-    float tickHalf = m_axisLength * TICK_LINE_LENGTH_RATIO;
+    auto setComp = [](QVector3D& p, int idx, float v) {
+        if (idx == 0) p.setX(v); else if (idx == 1) p.setY(v); else p.setZ(v);
+    };
 
     for (auto& ta : tickAxes) {
         float val = m_majorSpacing;
@@ -617,9 +710,6 @@ void GridRenderer::renderLabels(QPainter* painter, const QMatrix4x4& mvpMatrix,
                 if (signVal < fadeStart - 1e-9f || signVal > m_posExt + 1e-9f) continue;
 
                 QVector3D lblPos(0, 0, 0);
-                auto setComp = [](QVector3D& p, int idx, float v) {
-                    if (idx == 0) p.setX(v); else if (idx == 1) p.setY(v); else p.setZ(v);
-                };
                 setComp(lblPos, ta.mainAx, signVal);
                 setComp(lblPos, ta.perpA, tickHalf * 2.5f);
 
@@ -628,10 +718,14 @@ void GridRenderer::renderLabels(QPainter* painter, const QMatrix4x4& mvpMatrix,
                 if (c.alpha() <= 0) continue;
 
                 QPointF sp = project(lblPos);
-                if (sp.x() < 0 || sp.x() > viewportW || sp.y() < 0 || sp.y() > viewportH) continue;
+                if (sp.x() < -50 || sp.x() > viewportW + 50 ||
+                    sp.y() < -50 || sp.y() > viewportH + 50) continue;
+
+                QString txt = formatTickValue(signVal);
+                QSize ts = tfm.size(0, txt);
 
                 painter->setPen(c);
-                painter->drawText(sp + QPointF(2, -2), formatTickValue(signVal));
+                painter->drawText(sp + QPointF(-ts.width() * 0.5, ts.height() * 0.35), txt);
             }
             val += m_majorSpacing;
         }

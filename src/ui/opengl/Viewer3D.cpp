@@ -37,10 +37,14 @@ Viewer3D::Viewer3D(QWidget* parent)
     m_cameraAnimTimer.setInterval(16);
     connect(&m_cameraAnimTimer, &QTimer::timeout, this, &Viewer3D::updateCameraAnimation);
 
-    // 中键长按定时器（1000ms 触发全复位）
-    m_longPressTimer.setSingleShot(true);
-    m_longPressTimer.setInterval(1000);
-    connect(&m_longPressTimer, &QTimer::timeout, this, &Viewer3D::onLongPressTimeout);
+    // R 键长按定时器（1 秒恢复视角，2 秒恢复全部）
+    m_resetViewTimer.setSingleShot(true);
+    m_resetViewTimer.setInterval(1000);
+    connect(&m_resetViewTimer, &QTimer::timeout, this, &Viewer3D::onResetViewTimeout);
+
+    m_resetAllTimer.setSingleShot(true);
+    m_resetAllTimer.setInterval(2000);
+    connect(&m_resetAllTimer, &QTimer::timeout, this, &Viewer3D::onResetAllTimeout);
 }
 
 Viewer3D::~Viewer3D() {
@@ -68,7 +72,6 @@ void Viewer3D::initializeGL() {
     m_gridRenderer->initialize();
     m_trackRenderer->initialize();
 
-    // 首次更新网格
     m_gridRenderer->update(m_distance, m_sceneScale, m_elevation, m_azimuth, m_orthoBlend);
 }
 
@@ -108,10 +111,8 @@ void Viewer3D::paintGL() {
 
 // ── 矩阵计算 ──────────────────────────────────────────────────
 
-// 计算轨道相机视图矩阵（与 Python 版 viewMatrix() 完全对应）
 QMatrix4x4 Viewer3D::computeViewMatrix() const {
     QMatrix4x4 m;
-    // 平移 → 相机距离 → 仰角旋转 → 方位角旋转 → 场景缩放 → 目标偏移
     m.translate(m_panX, m_panY, 0.0f);
     m.translate(0.0f, 0.0f, -float(m_distance));
     m.rotate(float(m_elevation - 90.0), 1.0f, 0.0f, 0.0f);
@@ -187,41 +188,14 @@ void Viewer3D::mousePressEvent(QMouseEvent* ev) {
     setFocus();
     m_lastMousePos = ev->pos();
 
-    if (ev->button() == Qt::MiddleButton) {
-        m_middlePressed  = true;
-        m_isLongPress    = false;
-        m_middleDragging = false;
-        m_longPressTimer.start();
-        ev->accept();
-        return;
-    }
     if (ev->button() == Qt::LeftButton || ev->button() == Qt::RightButton) {
-        // 鼠标按下时停止正在进行的相机动画
         if (m_cameraAnimTimer.isActive()) m_cameraAnimTimer.stop();
         ev->accept();
     }
 }
 
 void Viewer3D::mouseReleaseEvent(QMouseEvent* ev) {
-    if (ev->button() == Qt::MiddleButton) {
-        if (m_longPressTimer.isActive()) {
-            m_longPressTimer.stop();
-            if (!m_isLongPress && !m_middleDragging) {
-                // 短按中键：复位相机朝向（不改变距离）
-                startResetAnimation(false);
-            }
-        }
-        m_middlePressed  = false;
-        m_isLongPress    = false;
-        m_middleDragging = false;
-        ev->accept();
-    }
-}
-
-void Viewer3D::onLongPressTimeout() {
-    // 中键长按：完整复位（距离 + 朝向 + 缩放）
-    m_isLongPress = true;
-    startResetAnimation(true);
+    Q_UNUSED(ev);
 }
 
 void Viewer3D::mouseMoveEvent(QMouseEvent* ev) {
@@ -230,23 +204,12 @@ void Viewer3D::mouseMoveEvent(QMouseEvent* ev) {
     int dy = curr.y() - m_lastMousePos.y();
     m_lastMousePos = curr;
 
-    if (ev->buttons() & Qt::MiddleButton) {
-        if (dx != 0 || dy != 0) {
-            m_middleDragging = true;
-            if (m_longPressTimer.isActive()) m_longPressTimer.stop();
-        }
-        ev->accept();
-        return;
-    }
-
     if (ev->buttons() & Qt::LeftButton) {
-        // 左键拖动：轨道旋转
         orbit(dx, dy);
         m_gridRenderer->update(m_distance, m_sceneScale, m_elevation, m_azimuth, m_orthoBlend);
         emit cameraChanged();
         update();
     } else if (ev->buttons() & Qt::RightButton) {
-        // 右键拖动：平移
         float scale = float(m_distance) * 0.001f;
         m_panX += dx * scale;
         m_panY -= dy * scale;
@@ -257,7 +220,6 @@ void Viewer3D::mouseMoveEvent(QMouseEvent* ev) {
 void Viewer3D::wheelEvent(QWheelEvent* ev) {
     if (m_cameraAnimTimer.isActive()) m_cameraAnimTimer.stop();
 
-    // 滚轮：平滑缩放（修改目标缩放，让动画定时器插值）
     int delta = ev->angleDelta().y();
     float factor = (delta > 0) ? 1.1f : (1.0f / 1.1f);
     m_targetSceneScale *= factor;
@@ -266,17 +228,41 @@ void Viewer3D::wheelEvent(QWheelEvent* ev) {
 }
 
 void Viewer3D::keyPressEvent(QKeyEvent* ev) {
-    if (ev->key() == Qt::Key_R) {
-        autoFitView();
+    if (ev->key() == Qt::Key_R && !ev->isAutoRepeat()) {
+        m_rKeyHeld       = true;
+        m_resetViewFired = false;
+        m_resetViewTimer.start();
+        m_resetAllTimer.start();
         ev->accept();
     } else {
         QOpenGLWidget::keyPressEvent(ev);
     }
 }
 
+void Viewer3D::keyReleaseEvent(QKeyEvent* ev) {
+    if (ev->key() == Qt::Key_R && !ev->isAutoRepeat()) {
+        m_rKeyHeld = false;
+        m_resetViewTimer.stop();
+        m_resetAllTimer.stop();
+        ev->accept();
+    } else {
+        QOpenGLWidget::keyReleaseEvent(ev);
+    }
+}
+
+void Viewer3D::onResetViewTimeout() {
+    if (!m_rKeyHeld) return;
+    m_resetViewFired = true;
+    startResetAnimation(false);
+}
+
+void Viewer3D::onResetAllTimeout() {
+    if (!m_rKeyHeld) return;
+    startResetAnimation(true);
+}
+
 // ── 动画 ──────────────────────────────────────────────────────
 
-// 平滑缩放动画（指数插值）
 void Viewer3D::updateZoomAnimation() {
     float diff = m_targetSceneScale - m_sceneScale;
     float relDiff = std::abs(diff) / std::max(m_sceneScale, 1e-9f);
@@ -305,7 +291,6 @@ void Viewer3D::updateOrthoAnimation() {
     update();
 }
 
-// 相机旋转/平移/缩放动画（OutQuad 缓动）
 void Viewer3D::updateCameraAnimation() {
     qint64 now     = QDateTime::currentMSecsSinceEpoch();
     qint64 elapsed = now - m_animStartTime;
@@ -314,18 +299,17 @@ void Viewer3D::updateCameraAnimation() {
         t = 1.0f;
         m_cameraAnimTimer.stop();
     }
-    // OutQuad 缓动：t = 1 - (1-t)²
     float ease = 1.0f - (1.0f - t) * (1.0f - t);
 
     auto lerp = [](double a, double b, float e) { return a + (b - a) * e; };
     auto lerpf= [](float  a, float  b, float e) { return a + (b - a) * e; };
 
-    m_distance  = lerp(m_animStart.distance,  m_animTarget.distance,  ease);
-    m_elevation = lerp(m_animStart.elevation, m_animTarget.elevation, ease);
-    m_azimuth   = lerp(m_animStart.azimuth,   m_animTarget.azimuth,   ease);
-    m_panX      = lerpf(float(m_animStart.panX), float(m_animTarget.panX), ease);
-    m_panY      = lerpf(float(m_animStart.panY), float(m_animTarget.panY), ease);
-    m_sceneScale= lerpf(float(m_animStart.sceneScale), float(m_animTarget.sceneScale), ease);
+    m_distance   = lerp(m_animStart.distance,   m_animTarget.distance,   ease);
+    m_elevation  = lerp(m_animStart.elevation,  m_animTarget.elevation,  ease);
+    m_azimuth    = lerp(m_animStart.azimuth,    m_animTarget.azimuth,    ease);
+    m_panX       = lerpf(float(m_animStart.panX), float(m_animTarget.panX), ease);
+    m_panY       = lerpf(float(m_animStart.panY), float(m_animTarget.panY), ease);
+    m_sceneScale = lerpf(float(m_animStart.sceneScale), float(m_animTarget.sceneScale), ease);
     m_targetSceneScale = m_sceneScale;
 
     m_gridRenderer->update(m_distance, m_sceneScale, m_elevation, m_azimuth, m_orthoBlend);
@@ -340,7 +324,6 @@ void Viewer3D::toggleProjection() {
     emit projectionModeChanged(m_useOrtho);
 }
 
-// 自动适应视图（调整相机距离以包含所有点）
 void Viewer3D::autoFitView() {
     const auto& pts = m_trackRenderer->points();
     if (pts.isEmpty()) return;
@@ -360,14 +343,13 @@ void Viewer3D::autoFitView() {
     if (!m_cameraAnimTimer.isActive()) m_cameraAnimTimer.start();
 }
 
-// 启动复位动画
 void Viewer3D::startResetAnimation(bool fullReset) {
     if (m_zoomAnimTimer.isActive()) m_zoomAnimTimer.stop();
 
-    double targetDist  = fullReset ? INIT_DISTANCE  : m_distance;
+    double targetDist  = fullReset ? INIT_DISTANCE : m_distance;
     float  targetScale = fullReset ? INIT_SCENE_SCALE : m_sceneScale;
+    m_targetSceneScale = targetScale;
 
-    // 计算方位角最短路径（避免绕远）
     double diffAzim = INIT_AZIMUTH - m_azimuth;
     diffAzim = std::fmod(diffAzim + 180.0, 360.0) - 180.0;
 
@@ -375,20 +357,18 @@ void Viewer3D::startResetAnimation(bool fullReset) {
     m_animTarget = {targetDist, INIT_ELEVATION, m_azimuth + diffAzim,
                     INIT_PAN_X, INIT_PAN_Y, targetScale};
     m_animStartTime = QDateTime::currentMSecsSinceEpoch();
-    m_targetSceneScale = targetScale;
     if (!m_cameraAnimTimer.isActive()) m_cameraAnimTimer.start();
 }
 
-// 动画过渡到指定视角（由 ViewGizmo 调用）
 void Viewer3D::animateToView(double elevation, double azimuth) {
     if (m_zoomAnimTimer.isActive()) m_zoomAnimTimer.stop();
 
-    // 方位角最短路径
     double diffAzim = azimuth - m_azimuth;
     diffAzim = std::fmod(diffAzim + 180.0, 360.0) - 180.0;
 
     m_animStart  = {m_distance, m_elevation, m_azimuth, m_panX, m_panY, m_sceneScale};
     m_animTarget = {m_distance, elevation, m_azimuth + diffAzim, m_panX, m_panY, m_sceneScale};
+    m_targetSceneScale = m_sceneScale;
     m_animStartTime = QDateTime::currentMSecsSinceEpoch();
     if (!m_cameraAnimTimer.isActive()) m_cameraAnimTimer.start();
 }
