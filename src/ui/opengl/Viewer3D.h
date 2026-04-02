@@ -64,6 +64,9 @@ public:
     // 启动复位动画（full_reset=true 时同时复位距离和缩放）
     void startResetAnimation(bool fullReset = true);
 
+    // 吸附到最近的标准正交视图（最小旋转角，一轴水平一轴垂直）
+    void snapToNearestStdView();
+
     // 设置渲染调试选项
     void setRenderDebugOptions(bool enabled, bool verbosePointUpdates);
 

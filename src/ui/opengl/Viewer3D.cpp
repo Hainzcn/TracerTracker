@@ -241,9 +241,17 @@ void Viewer3D::keyPressEvent(QKeyEvent* ev) {
 
 void Viewer3D::keyReleaseEvent(QKeyEvent* ev) {
     if (ev->key() == Qt::Key_R && !ev->isAutoRepeat()) {
+        bool wasFired = m_resetViewFired;
         m_rKeyHeld = false;
         m_resetViewTimer.stop();
         m_resetAllTimer.stop();
+
+        if (!wasFired) {
+            if (m_useOrtho)
+                snapToNearestStdView();
+            else
+                autoFitView();
+        }
         ev->accept();
     } else {
         QOpenGLWidget::keyReleaseEvent(ev);
@@ -328,17 +336,35 @@ void Viewer3D::autoFitView() {
     const auto& pts = m_trackRenderer->points();
     if (pts.isEmpty()) return;
 
-    float maxDist = 0.0f;
+    float maxCoord = 0.0f;
     for (auto it = pts.cbegin(); it != pts.cend(); ++it) {
         for (const QVector3D& p : it.value().history) {
-            maxDist = std::max(maxDist, p.length());
+            maxCoord = std::max(maxCoord, std::abs(p.x()));
+            maxCoord = std::max(maxCoord, std::abs(p.y()));
+            maxCoord = std::max(maxCoord, std::abs(p.z()));
         }
     }
 
-    double targetDist = (maxDist < 1.0f) ? INIT_DISTANCE : maxDist * 3.5;
+    if (maxCoord < 1e-6f) return;
+
+    constexpr float AXIS_VISUAL_RATIO = 0.5f;
+    float axisVisualEnd = float(m_distance) * AXIS_VISUAL_RATIO;
+    float lowerBound = axisVisualEnd * 0.50f;
+    float upperBound = axisVisualEnd * 0.80f;
+
+    float currentExtent = maxCoord * m_sceneScale;
+    float targetScale   = m_sceneScale;
+
+    if (currentExtent > upperBound)
+        targetScale = upperBound / maxCoord;
+    else if (currentExtent < lowerBound)
+        targetScale = lowerBound / maxCoord;
+
+    if (targetScale < 1e-6f) targetScale = 1e-6f;
 
     m_animStart  = {m_distance, m_elevation, m_azimuth, m_panX, m_panY, m_sceneScale};
-    m_animTarget = {targetDist, m_elevation, m_azimuth, INIT_PAN_X, INIT_PAN_Y, INIT_SCENE_SCALE};
+    m_animTarget = {m_distance, m_elevation, m_azimuth, INIT_PAN_X, INIT_PAN_Y, double(targetScale)};
+    m_targetSceneScale = targetScale;
     m_animStartTime = QDateTime::currentMSecsSinceEpoch();
     if (!m_cameraAnimTimer.isActive()) m_cameraAnimTimer.start();
 }
@@ -356,6 +382,94 @@ void Viewer3D::startResetAnimation(bool fullReset) {
     m_animStart  = {m_distance, m_elevation, m_azimuth, m_panX, m_panY, m_sceneScale};
     m_animTarget = {targetDist, INIT_ELEVATION, m_azimuth + diffAzim,
                     INIT_PAN_X, INIT_PAN_Y, targetScale};
+    m_animStartTime = QDateTime::currentMSecsSinceEpoch();
+    if (!m_cameraAnimTimer.isActive()) m_cameraAnimTimer.start();
+}
+
+void Viewer3D::snapToNearestStdView() {
+    // visibleAxes: 0=X, 1=Y, 2=Z — which two axes are visible in this view
+    struct StdView { double elev; double azim; bool inheritAzim; int visA; int visB; };
+    const StdView views[] = {
+        {  0, -90, false, 1, 2},  // +X 右  → YOZ
+        {  0,  90, false, 1, 2},  // -X 左  → YOZ
+        {  0, 180, false, 0, 2},  // +Y 后  → XOZ
+        {  0,   0, false, 0, 2},  // -Y 前  → XOZ
+        { 90,   0, true,  0, 1},  // +Z 俯  → XOY
+        {-90,   0, true,  0, 1},  // -Z 仰  → XOY
+    };
+
+    constexpr double DEG2RAD = M_PI / 180.0;
+    auto viewDir = [&](double elev, double azim) -> QVector3D {
+        float e = float(elev * DEG2RAD);
+        float a = float(azim * DEG2RAD);
+        float ce = std::cos(e);
+        return QVector3D(-ce * std::sin(a), ce * std::cos(a), std::sin(e));
+    };
+
+    QVector3D curDir = viewDir(m_elevation, m_azimuth);
+
+    double bestDot = -2.0;
+    int bestIdx = 0;
+    double bestAzim = 0;
+
+    for (int i = 0; i < 6; ++i) {
+        const auto& sv = views[i];
+        double azim = sv.inheritAzim
+            ? std::round(m_azimuth / 90.0) * 90.0
+            : sv.azim;
+        QVector3D svDir = viewDir(sv.elev, azim);
+        double dot = double(QVector3D::dotProduct(curDir, svDir));
+        if (dot > bestDot) {
+            bestDot = dot;
+            bestIdx = i;
+            bestAzim = azim;
+        }
+    }
+
+    const auto& best = views[bestIdx];
+    double targetElev = best.elev;
+
+    const auto& pts = m_trackRenderer->points();
+    float targetScale = m_sceneScale;
+
+    if (!pts.isEmpty()) {
+        float maxCoord = 0.0f;
+        auto axisVal = [](const QVector3D& p, int ax) -> float {
+            if (ax == 0) return std::abs(p.x());
+            if (ax == 1) return std::abs(p.y());
+            return std::abs(p.z());
+        };
+        for (auto it = pts.cbegin(); it != pts.cend(); ++it) {
+            for (const QVector3D& p : it.value().history) {
+                maxCoord = std::max(maxCoord, axisVal(p, best.visA));
+                maxCoord = std::max(maxCoord, axisVal(p, best.visB));
+            }
+        }
+
+        if (maxCoord > 1e-6f) {
+            constexpr float AXIS_VISUAL_RATIO = 0.5f;
+            float axisVisualEnd = float(m_distance) * AXIS_VISUAL_RATIO;
+            float lowerBound = axisVisualEnd * 0.50f;
+            float upperBound = axisVisualEnd * 0.80f;
+            float currentExtent = maxCoord * m_sceneScale;
+
+            if (currentExtent > upperBound)
+                targetScale = upperBound / maxCoord;
+            else if (currentExtent < lowerBound)
+                targetScale = lowerBound / maxCoord;
+            if (targetScale < 1e-6f) targetScale = 1e-6f;
+        }
+    }
+
+    if (m_zoomAnimTimer.isActive()) m_zoomAnimTimer.stop();
+
+    double diffAzim = bestAzim - m_azimuth;
+    diffAzim = std::fmod(diffAzim + 180.0, 360.0) - 180.0;
+
+    m_animStart  = {m_distance, m_elevation, m_azimuth, m_panX, m_panY, m_sceneScale};
+    m_animTarget = {m_distance, targetElev, m_azimuth + diffAzim,
+                    INIT_PAN_X, INIT_PAN_Y, double(targetScale)};
+    m_targetSceneScale = targetScale;
     m_animStartTime = QDateTime::currentMSecsSinceEpoch();
     if (!m_cameraAnimTimer.isActive()) m_cameraAnimTimer.start();
 }
