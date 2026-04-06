@@ -1,5 +1,5 @@
 #pragma once
-#include <QMainWindow>
+#include "FramelessWindow.h"
 #include <QLabel>
 #include <QCheckBox>
 #include <QSpinBox>
@@ -7,7 +7,6 @@
 #include <QPropertyAnimation>
 #include <QVariantAnimation>
 #include <QTimer>
-#include <QHBoxLayout>
 
 // ============================================================
 // MainWindow.h — TracerTracker 主窗口
@@ -39,7 +38,7 @@ class DataReceiver;
 class PoseProcessor;
 class AttitudePanelHotZone;
 
-class MainWindow : public QMainWindow {
+class MainWindow : public FramelessWindow {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* parent = nullptr);

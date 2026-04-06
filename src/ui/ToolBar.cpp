@@ -49,11 +49,8 @@ private:
 // ── ToolBar ───────────────────────────────────────────────────
 
 ToolBar::ToolBar(QWidget* parent) : QWidget(parent) {
-    setFixedHeight(32);
-    setStyleSheet(Styles::TOP_BAR_STYLE());
-
     auto* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(10, 0, 10, 0);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
 
     const int ctrlH = 24;
@@ -113,8 +110,6 @@ ToolBar::ToolBar(QWidget* parent) : QWidget(parent) {
     m_udpToggle->setStyleSheet(Styles::STYLE_BTN_IDLE());
     connect(m_udpToggle, &QPushButton::clicked, this, &ToolBar::toggleUdp);
     layout->addWidget(m_udpToggle);
-
-    layout->addStretch();
 
     // 初始化串口下拉列表
     refreshSerialPorts();
@@ -222,3 +217,4 @@ void ToolBar::setSerialUiIdle() {
     m_refreshBtn->setEnabled(true);
     emit serialStopRequested();
 }
+

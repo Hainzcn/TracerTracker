@@ -11,8 +11,6 @@
 #include "../ins/PoseProcessor.h"
 #include "../config/ConfigLoader.h"
 
-#include <QVBoxLayout>
-#include <QHBoxLayout>
 #include <QSizePolicy>
 #include <QResizeEvent>
 #include <QCloseEvent>
@@ -117,7 +115,7 @@ void AttitudePanelHotZone::paintEvent(QPaintEvent* ev) {
 // ── MainWindow ────────────────────────────────────────────────
 
 MainWindow::MainWindow(QWidget* parent)
-    : QMainWindow(parent)
+    : FramelessWindow(parent)
 {
     setWindowTitle("TracerTracker");
     resize(1280, 720);
@@ -126,19 +124,13 @@ MainWindow::MainWindow(QWidget* parent)
     m_dataReceiver  = new DataReceiver(this);
     m_poseProcessor = new PoseProcessor(this);
 
-    // ── 中心部件与布局 ──
-    auto* central = new QWidget(this);
-    central->setObjectName("centralWidget");
-    setCentralWidget(central);
-    auto* layout = new QVBoxLayout(central);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
+    auto* layout = contentLayout();
 
-    // ── 工具栏 ──
+    // ── 工具栏（添加到基类顶栏左侧）──
     m_toolbar = new ToolBar(this);
     m_toolbar->bindDataReceiver(m_dataReceiver);
     connect(m_toolbar, &ToolBar::serialStopRequested, this, &MainWindow::clearScene);
-    layout->addWidget(m_toolbar);
+    toolBarLayout()->insertWidget(0, m_toolbar);
 
     // ── 3D 视口 ──
     m_viewer = new Viewer3D(this);
@@ -633,7 +625,7 @@ void MainWindow::checkStatusTimeout() {
 // ── 事件 ─────────────────────────────────────────────────────
 
 void MainWindow::resizeEvent(QResizeEvent* ev) {
-    QMainWindow::resizeEvent(ev);
+    FramelessWindow::resizeEvent(ev);
     repositionOverlays();
 }
 
@@ -641,10 +633,11 @@ void MainWindow::resizeEvent(QResizeEvent* ev) {
 bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
     if (obj == m_viewer && ev->type() == QEvent::Resize)
         repositionOverlays();
-    return QMainWindow::eventFilter(obj, ev);
+    return FramelessWindow::eventFilter(obj, ev);
 }
 
 void MainWindow::closeEvent(QCloseEvent* ev) {
     m_dataReceiver->stopAll();
-    QMainWindow::closeEvent(ev);
+    FramelessWindow::closeEvent(ev);
 }
+

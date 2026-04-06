@@ -1,0 +1,192 @@
+#include "FramelessWindow.h"
+#include "Styles.h"
+
+#include <QShowEvent>
+#include <QApplication>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <windowsx.h>
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib")
+#endif
+
+// ============================================================
+// FramelessWindow.cpp — 自定义无边框窗口实现
+// ============================================================
+
+FramelessWindow::FramelessWindow(QWidget* parent)
+    : QMainWindow(parent)
+{
+    setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowMinMaxButtonsHint);
+
+    // ── 根布局 ──
+    auto* root = new QWidget(this);
+    root->setObjectName("centralWidget");
+    setCentralWidget(root);
+    m_rootLayout = new QVBoxLayout(root);
+    m_rootLayout->setContentsMargins(0, 0, 0, 0);
+    m_rootLayout->setSpacing(0);
+
+    // ── 顶栏 ──
+    m_toolBar = new QWidget(this);
+    m_toolBar->setFixedHeight(TOOLBAR_HEIGHT);
+    m_toolBar->setStyleSheet(Styles::TOP_BAR_STYLE());
+
+    m_toolBarLayout = new QHBoxLayout(m_toolBar);
+    m_toolBarLayout->setContentsMargins(10, 0, 0, 0);
+    m_toolBarLayout->setSpacing(8);
+
+    // 左侧 stretch 使窗口控制按钮贴右
+    m_toolBarLayout->addStretch();
+
+    // ── 窗口控制按钮 ──
+    m_winBtnContainer = new QWidget(m_toolBar);
+    auto* winLayout = new QHBoxLayout(m_winBtnContainer);
+    winLayout->setContentsMargins(0, 0, 0, 0);
+    winLayout->setSpacing(0);
+
+    m_minimizeBtn = new QPushButton(QString::fromUtf8("\u2014"), m_winBtnContainer);
+    m_minimizeBtn->setStyleSheet(Styles::STYLE_WIN_BTN());
+    m_minimizeBtn->setFixedSize(BTN_WIDTH, BTN_HEIGHT);
+    connect(m_minimizeBtn, &QPushButton::clicked, this, &QWidget::showMinimized);
+    winLayout->addWidget(m_minimizeBtn);
+
+    m_maximizeBtn = new QPushButton(QString::fromUtf8("\u25A1"), m_winBtnContainer);
+    m_maximizeBtn->setStyleSheet(Styles::STYLE_WIN_BTN());
+    m_maximizeBtn->setFixedSize(BTN_WIDTH, BTN_HEIGHT);
+    connect(m_maximizeBtn, &QPushButton::clicked, this, [this]{
+        isMaximized() ? showNormal() : showMaximized();
+    });
+    winLayout->addWidget(m_maximizeBtn);
+
+    m_closeBtn = new QPushButton(QString::fromUtf8("\u2715"), m_winBtnContainer);
+    m_closeBtn->setStyleSheet(Styles::STYLE_WIN_CLOSE_BTN());
+    m_closeBtn->setFixedSize(BTN_WIDTH, BTN_HEIGHT);
+    connect(m_closeBtn, &QPushButton::clicked, this, &QWidget::close);
+    winLayout->addWidget(m_closeBtn);
+
+    m_toolBarLayout->addWidget(m_winBtnContainer);
+
+    m_rootLayout->addWidget(m_toolBar);
+
+    // ── 内容区域 ──
+    m_contentLayout = new QVBoxLayout;
+    m_contentLayout->setContentsMargins(0, 0, 0, 0);
+    m_contentLayout->setSpacing(0);
+    m_rootLayout->addLayout(m_contentLayout, 1);
+}
+
+QRect FramelessWindow::winButtonsRect() const {
+    if (!m_winBtnContainer) return QRect();
+    QPoint topLeft = m_winBtnContainer->mapTo(this, QPoint(0, 0));
+    return QRect(topLeft, m_winBtnContainer->size());
+}
+
+void FramelessWindow::updateMaximizeButton() {
+    m_maximizeBtn->setText(isMaximized() ? QString::fromUtf8("\u2750")    // ❐
+                                         : QString::fromUtf8("\u25A1"));  // □
+}
+
+// ── 事件 ─────────────────────────────────────────────────────
+
+void FramelessWindow::showEvent(QShowEvent* ev) {
+    QMainWindow::showEvent(ev);
+#ifdef Q_OS_WIN
+    if (!m_nativeBorderSetup) {
+        m_nativeBorderSetup = true;
+        HWND hwnd = reinterpret_cast<HWND>(winId());
+
+        LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+        style |= WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX;
+        SetWindowLongW(hwnd, GWL_STYLE, style);
+
+        COLORREF borderColor = RGB(0x33, 0x33, 0x33);
+        DwmSetWindowAttribute(hwnd, 34 /*DWMWA_BORDER_COLOR*/,
+                              &borderColor, sizeof(borderColor));
+
+        SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                     SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE |
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+#endif
+}
+
+void FramelessWindow::changeEvent(QEvent* ev) {
+    QMainWindow::changeEvent(ev);
+    if (ev->type() == QEvent::WindowStateChange) {
+        updateMaximizeButton();
+#ifdef Q_OS_WIN
+        HWND hwnd = reinterpret_cast<HWND>(winId());
+        if (isMaximized()) {
+            DWORD cornerPref = 1; // DWMWCP_DONOTROUND
+            DwmSetWindowAttribute(hwnd, 33, &cornerPref, sizeof(cornerPref));
+            COLORREF noColor = 0xFFFFFFFE; // DWMWA_COLOR_NONE
+            DwmSetWindowAttribute(hwnd, 34, &noColor, sizeof(noColor));
+        } else {
+            DWORD cornerPref = 2; // DWMWCP_ROUND
+            DwmSetWindowAttribute(hwnd, 33, &cornerPref, sizeof(cornerPref));
+            COLORREF borderColor = RGB(0x33, 0x33, 0x33);
+            DwmSetWindowAttribute(hwnd, 34, &borderColor, sizeof(borderColor));
+        }
+#endif
+    }
+}
+
+#ifdef Q_OS_WIN
+bool FramelessWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
+    if (eventType != "windows_generic_MSG")
+        return QMainWindow::nativeEvent(eventType, message, result);
+
+    auto* msg = static_cast<MSG*>(message);
+
+    if (msg->message == WM_NCCALCSIZE) {
+        if (msg->wParam == TRUE && isMaximized()) {
+            auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(msg->lParam);
+            HMONITOR mon = MonitorFromWindow(msg->hwnd, MONITOR_DEFAULTTONEAREST);
+            MONITORINFO mi{};
+            mi.cbSize = sizeof(mi);
+            GetMonitorInfoW(mon, &mi);
+            params->rgrc[0] = mi.rcWork;
+        }
+        *result = 0;
+        return true;
+    }
+
+    if (msg->message == WM_NCHITTEST) {
+        RECT winRect;
+        GetWindowRect(msg->hwnd, &winRect);
+        int x = GET_X_LPARAM(msg->lParam) - winRect.left;
+        int y = GET_Y_LPARAM(msg->lParam) - winRect.top;
+        int w = winRect.right - winRect.left;
+        int h = winRect.bottom - winRect.top;
+
+        if (!isMaximized()) {
+            if (x < BORDER_WIDTH && y < BORDER_WIDTH)                   { *result = HTTOPLEFT;     return true; }
+            if (x >= w - BORDER_WIDTH && y < BORDER_WIDTH)              { *result = HTTOPRIGHT;    return true; }
+            if (x < BORDER_WIDTH && y >= h - BORDER_WIDTH)              { *result = HTBOTTOMLEFT;  return true; }
+            if (x >= w - BORDER_WIDTH && y >= h - BORDER_WIDTH)         { *result = HTBOTTOMRIGHT; return true; }
+            if (x < BORDER_WIDTH)                                        { *result = HTLEFT;        return true; }
+            if (x >= w - BORDER_WIDTH)                                   { *result = HTRIGHT;       return true; }
+            if (y < BORDER_WIDTH)                                        { *result = HTTOP;         return true; }
+            if (y >= h - BORDER_WIDTH)                                   { *result = HTBOTTOM;      return true; }
+        }
+
+        int tbH = m_toolBar ? m_toolBar->height() : TOOLBAR_HEIGHT;
+        if (y < tbH) {
+            QRect btnRect = winButtonsRect();
+            if (x >= btnRect.left()) {
+                *result = HTCLIENT;
+                return true;
+            }
+            *result = HTCAPTION;
+            return true;
+        }
+
+        *result = HTCLIENT;
+        return true;
+    }
+
+    return QMainWindow::nativeEvent(eventType, message, result);
+}
+#endif

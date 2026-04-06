@@ -53,6 +53,7 @@ set(SOURCES
     src/ui/opengl/Viewer3D.cpp
     src/ui/opengl/GridRenderer.cpp
     src/ui/opengl/TrackRenderer.cpp
+    src/ui/FramelessWindow.cpp
     src/ui/ToolBar.cpp
     src/ui/DebugConsole.cpp
     src/ui/AttitudeWidget.cpp
@@ -99,6 +100,7 @@ if(WIN32)
         WIN32_LEAN_AND_MEAN
         NOMINMAX
     )
+    target_link_libraries(${PROJECT_NAME} PRIVATE dwmapi)
     # Release 模式下不显示控制台窗口
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
