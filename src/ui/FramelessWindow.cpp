@@ -4,6 +4,9 @@
 #include <QShowEvent>
 #include <QApplication>
 #include <QCursor>
+#include <QIcon>
+#include <QPainter>
+#include <QPen>
 
 #include <algorithm>
 
@@ -22,6 +25,85 @@ constexpr DWORD kDwmCornerDoNotRound = 1;
 constexpr DWORD kDwmCornerRound = 2;
 constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
 #endif
+
+constexpr int kWindowIconExtent = 10;      // 图标主体边长，控制横线/方框/叉形的视觉统一
+constexpr qreal kWindowIconStroke = 1;    // 三个按钮统一线宽
+const QColor kWindowIconColor("#cccccc");
+
+QRectF centeredStrokeRect(const QSize& size, int extent, qreal offsetX = 0.0, qreal offsetY = 0.0) {
+    // 1px 描边要落在 n+0.5 的中心线上，才能在偶数画布里保持真正视觉居中。
+    return QRectF((size.width() - extent) * 0.5 + offsetX,
+                  (size.height() - extent) * 0.5 + offsetY,
+                  extent - 1.0,
+                  extent - 1.0);
+}
+
+QPen makeWindowIconPen() {
+    QPen pen(kWindowIconColor, kWindowIconStroke, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin);
+    pen.setCosmetic(true);
+    return pen;
+}
+
+QIcon makeMinimizeIcon() {
+    QPixmap pixmap(16, 16);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setPen(makeWindowIconPen());
+
+    const QRectF rect = centeredStrokeRect(pixmap.size(), kWindowIconExtent);
+    painter.drawLine(QPointF(rect.left(), rect.center().y()),
+                     QPointF(rect.right(), rect.center().y()));
+    return QIcon(pixmap);
+}
+
+QIcon makeMaximizeIcon() {
+    QPixmap pixmap(16, 16);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setPen(makeWindowIconPen());
+    painter.setBrush(Qt::NoBrush);
+
+    const QRectF rect = centeredStrokeRect(pixmap.size(), kWindowIconExtent);
+    painter.drawRoundedRect(rect, 1.0, 1.0);
+    return QIcon(pixmap);
+}
+
+QIcon makeRestoreIcon() {
+    QPixmap pixmap(16, 16);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setPen(makeWindowIconPen());
+    painter.setBrush(Qt::NoBrush);
+
+    const QRectF backRect(5.5, 3.5, 6.0, 6.0);
+    const QRectF frontRect(3.5, 5.5, 6.0, 6.0);
+    painter.drawRoundedRect(backRect, 1.0, 1.0);
+    painter.drawRoundedRect(frontRect, 1.0, 1.0);
+    return QIcon(pixmap);
+}
+
+QIcon makeCloseIcon() {
+    QPixmap pixmap(16, 16);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setPen(makeWindowIconPen());
+
+    // 偶数边长下，对角线落到半像素中心线更容易保持视觉居中。
+    const qreal diagonalOffset = (kWindowIconExtent % 2 == 0) ? 0.5 : 0.0;
+    const QRectF rect = centeredStrokeRect(pixmap.size(), kWindowIconExtent,
+                                           diagonalOffset, diagonalOffset);
+    painter.drawLine(rect.topLeft(), rect.bottomRight());
+    painter.drawLine(rect.topRight(), rect.bottomLeft());
+    return QIcon(pixmap);
+}
 }
 
 // ============================================================
@@ -59,21 +141,27 @@ FramelessWindow::FramelessWindow(QWidget* parent)
     winLayout->setContentsMargins(0, 0, 0, 0);
     winLayout->setSpacing(0);
 
-    m_minimizeBtn = new QPushButton(QString::fromUtf8("\u2014"), m_winBtnContainer);
+    m_minimizeBtn = new QPushButton(m_winBtnContainer);
     m_minimizeBtn->setStyleSheet(Styles::STYLE_WIN_BTN());
     m_minimizeBtn->setFixedSize(BTN_WIDTH, BTN_HEIGHT);
+    m_minimizeBtn->setIcon(makeMinimizeIcon());
+    m_minimizeBtn->setIconSize(QSize(16, 16));
     connect(m_minimizeBtn, &QPushButton::clicked, this, &QWidget::showMinimized);
     winLayout->addWidget(m_minimizeBtn);
 
-    m_maximizeBtn = new QPushButton(QString::fromUtf8("\u25A1"), m_winBtnContainer);
+    m_maximizeBtn = new QPushButton(m_winBtnContainer);
     m_maximizeBtn->setStyleSheet(Styles::STYLE_WIN_BTN());
     m_maximizeBtn->setFixedSize(BTN_WIDTH, BTN_HEIGHT);
+    m_maximizeBtn->setIcon(makeMaximizeIcon());
+    m_maximizeBtn->setIconSize(QSize(16, 16));
     connect(m_maximizeBtn, &QPushButton::clicked, this, &FramelessWindow::toggleMaximizeRestore);
     winLayout->addWidget(m_maximizeBtn);
 
-    m_closeBtn = new QPushButton(QString::fromUtf8("\u2715"), m_winBtnContainer);
+    m_closeBtn = new QPushButton(m_winBtnContainer);
     m_closeBtn->setStyleSheet(Styles::STYLE_WIN_CLOSE_BTN());
     m_closeBtn->setFixedSize(BTN_WIDTH, BTN_HEIGHT);
+    m_closeBtn->setIcon(makeCloseIcon());
+    m_closeBtn->setIconSize(QSize(16, 16));
     connect(m_closeBtn, &QPushButton::clicked, this, &QWidget::close);
     winLayout->addWidget(m_closeBtn);
 
@@ -101,8 +189,7 @@ void FramelessWindow::updateMaximizeButton() {
 #else
         isMaximized();
 #endif
-    m_maximizeBtn->setText(maximized ? QString::fromUtf8("\u2750")        // ❐
-                                     : QString::fromUtf8("\u25A1"));      // □
+    m_maximizeBtn->setIcon(maximized ? makeRestoreIcon() : makeMaximizeIcon());
 }
 
 void FramelessWindow::updateWindowFrameState() {

@@ -138,7 +138,7 @@ QPushButton:pressed { background-color: #1b5e20; }
 inline QString STYLE_WIN_BTN() {
     return R"(
 QPushButton {
-    color: #cccccc; background: transparent;
+    color: #cccccc; background: #252526;
     border: none; border-radius: 0px;
     font-size: 14px; padding: 0px;
     min-width: 46px; min-height: 32px; max-width: 46px; max-height: 32px;
@@ -152,7 +152,7 @@ QPushButton:pressed { background-color: #2a2a2a; }
 inline QString STYLE_WIN_CLOSE_BTN() {
     return R"(
 QPushButton {
-    color: #cccccc; background: transparent;
+    color: #cccccc; background: #252526;
     border: none; border-radius: 0px;
     font-size: 14px; padding: 0px;
     min-width: 46px; min-height: 32px; max-width: 46px; max-height: 32px;
