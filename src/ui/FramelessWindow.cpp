@@ -29,6 +29,7 @@ constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
 constexpr int kWindowIconExtent = 10;      // 图标主体边长，控制横线/方框/叉形的视觉统一
 constexpr qreal kWindowIconStroke = 1;    // 三个按钮统一线宽
 const QColor kWindowIconColor("#cccccc");
+const QColor kWindowIconCornerColor("#787878");
 
 QRectF centeredStrokeRect(const QSize& size, int extent, qreal offsetX = 0.0, qreal offsetY = 0.0) {
     // 1px 描边要落在 n+0.5 的中心线上，才能在偶数画布里保持真正视觉居中。
@@ -38,10 +39,26 @@ QRectF centeredStrokeRect(const QSize& size, int extent, qreal offsetX = 0.0, qr
                   extent - 1.0);
 }
 
+QRect centeredPixelBounds(const QSize& size, int extent) {
+    return QRect((size.width() - extent) / 2, (size.height() - extent) / 2, extent, extent);
+}
+
 QPen makeWindowIconPen() {
     QPen pen(kWindowIconColor, kWindowIconStroke, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin);
     pen.setCosmetic(true);
     return pen;
+}
+
+void highlightRectCorners(QPainter& painter, const QRectF& rect) {
+    const int left = qRound(rect.left());
+    const int top = qRound(rect.top());
+    const int right = qRound(rect.right());
+    const int bottom = qRound(rect.bottom());
+
+    painter.fillRect(left, top, 1, 1, kWindowIconCornerColor);
+    painter.fillRect(right, top, 1, 1, kWindowIconCornerColor);
+    painter.fillRect(left, bottom, 1, 1, kWindowIconCornerColor);
+    painter.fillRect(right, bottom, 1, 1, kWindowIconCornerColor);
 }
 
 QIcon makeMinimizeIcon() {
@@ -68,7 +85,8 @@ QIcon makeMaximizeIcon() {
     painter.setBrush(Qt::NoBrush);
 
     const QRectF rect = centeredStrokeRect(pixmap.size(), kWindowIconExtent);
-    painter.drawRoundedRect(rect, 1.0, 1.0);
+    painter.drawRect(rect);
+    highlightRectCorners(painter, rect);
     return QIcon(pixmap);
 }
 
@@ -83,8 +101,10 @@ QIcon makeRestoreIcon() {
 
     const QRectF backRect(5.5, 3.5, 6.0, 6.0);
     const QRectF frontRect(3.5, 5.5, 6.0, 6.0);
-    painter.drawRoundedRect(backRect, 1.0, 1.0);
-    painter.drawRoundedRect(frontRect, 1.0, 1.0);
+    painter.drawRect(backRect);
+    painter.drawRect(frontRect);
+    highlightRectCorners(painter, backRect);
+    highlightRectCorners(painter, frontRect);
     return QIcon(pixmap);
 }
 
@@ -94,14 +114,15 @@ QIcon makeCloseIcon() {
 
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing, false);
-    painter.setPen(makeWindowIconPen());
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(kWindowIconColor);
 
-    // 偶数边长下，对角线落到半像素中心线更容易保持视觉居中。
-    const qreal diagonalOffset = (kWindowIconExtent % 2 == 0) ? 0.5 : 0.0;
-    const QRectF rect = centeredStrokeRect(pixmap.size(), kWindowIconExtent,
-                                           diagonalOffset, diagonalOffset);
-    painter.drawLine(rect.topLeft(), rect.bottomRight());
-    painter.drawLine(rect.topRight(), rect.bottomLeft());
+    // 逐像素绘制可保证偶数边长时叉号中心形成 2x2 结构，并保持完整 10px 高度。
+    const QRect rect = centeredPixelBounds(pixmap.size(), kWindowIconExtent);
+    for (int i = 0; i < rect.width(); ++i) {
+        painter.fillRect(rect.left() + i, rect.top() + i, 1, 1, kWindowIconColor);
+        painter.fillRect(rect.right() - i, rect.top() + i, 1, 1, kWindowIconColor);
+    }
     return QIcon(pixmap);
 }
 }
