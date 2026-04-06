@@ -5,6 +5,10 @@
 #include <QPushButton>
 #include <QWidget>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
 // ============================================================
 // FramelessWindow — 自定义无边框窗口基类
 //
@@ -46,6 +50,14 @@ protected:
 
 private:
     void updateMaximizeButton();
+    void updateWindowFrameState();
+    void toggleMaximizeRestore();
+
+#ifdef Q_OS_WIN
+    bool isWindowActuallyMaximized(HWND hwnd) const;
+    bool isInTitleBarDragArea(const QPoint& screenPos) const;
+    void beginRestoreDrag(HWND hwnd);
+#endif
 
     // 顶栏
     QWidget*     m_toolBar        = nullptr;
@@ -62,6 +74,11 @@ private:
     QVBoxLayout* m_contentLayout = nullptr;
 
     bool m_nativeBorderSetup = false;
+
+#ifdef Q_OS_WIN
+    bool   m_pendingMaximizedDrag = false;
+    QPoint m_maximizedDragStart;
+#endif
 
     static constexpr int TOOLBAR_HEIGHT = 32;
     static constexpr int BORDER_WIDTH   = 5;

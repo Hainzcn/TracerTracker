@@ -3,6 +3,9 @@
 
 #include <QShowEvent>
 #include <QApplication>
+#include <QCursor>
+
+#include <algorithm>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -10,6 +13,16 @@
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
 #endif
+
+namespace {
+#ifdef Q_OS_WIN
+constexpr DWORD kDwmWindowCornerPreference = 33;
+constexpr DWORD kDwmBorderColor = 34;
+constexpr DWORD kDwmCornerDoNotRound = 1;
+constexpr DWORD kDwmCornerRound = 2;
+constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
+#endif
+}
 
 // ============================================================
 // FramelessWindow.cpp — 自定义无边框窗口实现
@@ -55,9 +68,7 @@ FramelessWindow::FramelessWindow(QWidget* parent)
     m_maximizeBtn = new QPushButton(QString::fromUtf8("\u25A1"), m_winBtnContainer);
     m_maximizeBtn->setStyleSheet(Styles::STYLE_WIN_BTN());
     m_maximizeBtn->setFixedSize(BTN_WIDTH, BTN_HEIGHT);
-    connect(m_maximizeBtn, &QPushButton::clicked, this, [this]{
-        isMaximized() ? showNormal() : showMaximized();
-    });
+    connect(m_maximizeBtn, &QPushButton::clicked, this, &FramelessWindow::toggleMaximizeRestore);
     winLayout->addWidget(m_maximizeBtn);
 
     m_closeBtn = new QPushButton(QString::fromUtf8("\u2715"), m_winBtnContainer);
@@ -84,8 +95,49 @@ QRect FramelessWindow::winButtonsRect() const {
 }
 
 void FramelessWindow::updateMaximizeButton() {
-    m_maximizeBtn->setText(isMaximized() ? QString::fromUtf8("\u2750")    // ❐
-                                         : QString::fromUtf8("\u25A1"));  // □
+    const bool maximized =
+#ifdef Q_OS_WIN
+        isWindowActuallyMaximized(reinterpret_cast<HWND>(winId()));
+#else
+        isMaximized();
+#endif
+    m_maximizeBtn->setText(maximized ? QString::fromUtf8("\u2750")        // ❐
+                                     : QString::fromUtf8("\u25A1"));      // □
+}
+
+void FramelessWindow::updateWindowFrameState() {
+    updateMaximizeButton();
+
+#ifdef Q_OS_WIN
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (!hwnd)
+        return;
+
+    if (isWindowActuallyMaximized(hwnd)) {
+        DWORD cornerPref = kDwmCornerDoNotRound;
+        DwmSetWindowAttribute(hwnd, kDwmWindowCornerPreference, &cornerPref, sizeof(cornerPref));
+        DwmSetWindowAttribute(hwnd, kDwmBorderColor, &kDwmColorNone, sizeof(kDwmColorNone));
+    } else {
+        DWORD cornerPref = kDwmCornerRound;
+        COLORREF borderColor = RGB(0x33, 0x33, 0x33);
+        DwmSetWindowAttribute(hwnd, kDwmWindowCornerPreference, &cornerPref, sizeof(cornerPref));
+        DwmSetWindowAttribute(hwnd, kDwmBorderColor, &borderColor, sizeof(borderColor));
+    }
+#endif
+}
+
+void FramelessWindow::toggleMaximizeRestore() {
+#ifdef Q_OS_WIN
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (hwnd) {
+        ShowWindow(hwnd, isWindowActuallyMaximized(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+        updateWindowFrameState();
+        return;
+    }
+#endif
+
+    isMaximized() ? showNormal() : showMaximized();
+    updateWindowFrameState();
 }
 
 // ── 事件 ─────────────────────────────────────────────────────
@@ -109,31 +161,74 @@ void FramelessWindow::showEvent(QShowEvent* ev) {
                      SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE |
                      SWP_NOZORDER | SWP_NOACTIVATE);
     }
+    updateWindowFrameState();
 #endif
 }
 
 void FramelessWindow::changeEvent(QEvent* ev) {
     QMainWindow::changeEvent(ev);
-    if (ev->type() == QEvent::WindowStateChange) {
-        updateMaximizeButton();
-#ifdef Q_OS_WIN
-        HWND hwnd = reinterpret_cast<HWND>(winId());
-        if (isMaximized()) {
-            DWORD cornerPref = 1; // DWMWCP_DONOTROUND
-            DwmSetWindowAttribute(hwnd, 33, &cornerPref, sizeof(cornerPref));
-            COLORREF noColor = 0xFFFFFFFE; // DWMWA_COLOR_NONE
-            DwmSetWindowAttribute(hwnd, 34, &noColor, sizeof(noColor));
-        } else {
-            DWORD cornerPref = 2; // DWMWCP_ROUND
-            DwmSetWindowAttribute(hwnd, 33, &cornerPref, sizeof(cornerPref));
-            COLORREF borderColor = RGB(0x33, 0x33, 0x33);
-            DwmSetWindowAttribute(hwnd, 34, &borderColor, sizeof(borderColor));
-        }
-#endif
-    }
+    if (ev->type() == QEvent::WindowStateChange)
+        updateWindowFrameState();
 }
 
 #ifdef Q_OS_WIN
+bool FramelessWindow::isWindowActuallyMaximized(HWND hwnd) const {
+    return hwnd && IsZoomed(hwnd);
+}
+
+bool FramelessWindow::isInTitleBarDragArea(const QPoint& screenPos) const {
+    const QPoint localPos = mapFromGlobal(screenPos);
+    const int tbH = m_toolBar ? m_toolBar->height() : TOOLBAR_HEIGHT;
+    if (localPos.y() < 0 || localPos.y() >= tbH)
+        return false;
+
+    if (localPos.x() < 0 || localPos.x() >= width())
+        return false;
+
+    const QRect btnRect = winButtonsRect();
+    return !btnRect.isValid() || localPos.x() < btnRect.left();
+}
+
+void FramelessWindow::beginRestoreDrag(HWND hwnd) {
+    if (!hwnd)
+        return;
+
+    WINDOWPLACEMENT wp{};
+    wp.length = sizeof(wp);
+    if (!GetWindowPlacement(hwnd, &wp))
+        return;
+
+    RECT maximizedRect{};
+    if (!GetWindowRect(hwnd, &maximizedRect))
+        return;
+
+    int normalWidth = int(wp.rcNormalPosition.right - wp.rcNormalPosition.left);
+    if (normalWidth <= 0) {
+        normalWidth = width();
+    }
+
+    const int maximizedWidth = std::max(1, int(maximizedRect.right - maximizedRect.left));
+    double widthRatio = double(m_maximizedDragStart.x() - maximizedRect.left) / double(maximizedWidth);
+    if (widthRatio < 0.0)
+        widthRatio = 0.0;
+    else if (widthRatio > 1.0)
+        widthRatio = 1.0;
+
+    const int restoredX = m_maximizedDragStart.x() - int(normalWidth * widthRatio);
+    const int dragOffsetY = int(m_maximizedDragStart.y() - maximizedRect.top);
+    const int titleBarOffset = std::max(0, std::min(dragOffsetY,
+                                                    m_toolBar ? m_toolBar->height() : TOOLBAR_HEIGHT));
+    const int restoredY = m_maximizedDragStart.y() - titleBarOffset;
+
+    ShowWindow(hwnd, SW_RESTORE);
+    SetWindowPos(hwnd, nullptr, restoredX, restoredY, 0, 0,
+                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    updateWindowFrameState();
+
+    ReleaseCapture();
+    SendMessageW(hwnd, WM_SYSCOMMAND, SC_MOVE | HTCAPTION, 0);
+}
+
 bool FramelessWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
     if (eventType != "windows_generic_MSG")
         return QMainWindow::nativeEvent(eventType, message, result);
@@ -141,16 +236,56 @@ bool FramelessWindow::nativeEvent(const QByteArray& eventType, void* message, qi
     auto* msg = static_cast<MSG*>(message);
 
     if (msg->message == WM_NCCALCSIZE) {
-        if (msg->wParam == TRUE && isMaximized()) {
+        if (msg->wParam == TRUE && isWindowActuallyMaximized(msg->hwnd)) {
             auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(msg->lParam);
             HMONITOR mon = MonitorFromWindow(msg->hwnd, MONITOR_DEFAULTTONEAREST);
             MONITORINFO mi{};
             mi.cbSize = sizeof(mi);
             GetMonitorInfoW(mon, &mi);
             params->rgrc[0] = mi.rcWork;
+            *result = 0;
+            return true;
         }
-        *result = 0;
-        return true;
+        return QMainWindow::nativeEvent(eventType, message, result);
+    }
+
+    if (msg->message == WM_NCLBUTTONDOWN) {
+        const QPoint screenPos(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
+        if (msg->wParam == HTCAPTION && isWindowActuallyMaximized(msg->hwnd) && isInTitleBarDragArea(screenPos)) {
+            m_pendingMaximizedDrag = true;
+            m_maximizedDragStart = screenPos;
+            *result = 0;
+            return true;
+        }
+    }
+
+    if (msg->message == WM_NCLBUTTONDBLCLK) {
+        const QPoint screenPos(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
+        if (msg->wParam == HTCAPTION && isInTitleBarDragArea(screenPos)) {
+            m_pendingMaximizedDrag = false;
+            toggleMaximizeRestore();
+            *result = 0;
+            return true;
+        }
+    }
+
+    if (msg->message == WM_NCLBUTTONUP || msg->message == WM_LBUTTONUP || msg->message == WM_CAPTURECHANGED) {
+        m_pendingMaximizedDrag = false;
+    }
+
+    if ((msg->message == WM_MOUSEMOVE || msg->message == WM_NCMOUSEMOVE) && m_pendingMaximizedDrag) {
+        if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0) {
+            m_pendingMaximizedDrag = false;
+        } else {
+            const QPoint screenPos = QCursor::pos();
+            const int dragDistance = QApplication::startDragDistance();
+            if ((screenPos - m_maximizedDragStart).manhattanLength() >= dragDistance) {
+                m_pendingMaximizedDrag = false;
+                beginRestoreDrag(msg->hwnd);
+                *result = 0;
+                return true;
+            }
+        }
     }
 
     if (msg->message == WM_NCHITTEST) {
@@ -161,7 +296,9 @@ bool FramelessWindow::nativeEvent(const QByteArray& eventType, void* message, qi
         int w = winRect.right - winRect.left;
         int h = winRect.bottom - winRect.top;
 
-        if (!isMaximized()) {
+        const bool maximized = isWindowActuallyMaximized(msg->hwnd);
+
+        if (!maximized) {
             if (x < BORDER_WIDTH && y < BORDER_WIDTH)                   { *result = HTTOPLEFT;     return true; }
             if (x >= w - BORDER_WIDTH && y < BORDER_WIDTH)              { *result = HTTOPRIGHT;    return true; }
             if (x < BORDER_WIDTH && y >= h - BORDER_WIDTH)              { *result = HTBOTTOMLEFT;  return true; }
@@ -172,13 +309,8 @@ bool FramelessWindow::nativeEvent(const QByteArray& eventType, void* message, qi
             if (y >= h - BORDER_WIDTH)                                   { *result = HTBOTTOM;      return true; }
         }
 
-        int tbH = m_toolBar ? m_toolBar->height() : TOOLBAR_HEIGHT;
-        if (y < tbH) {
-            QRect btnRect = winButtonsRect();
-            if (x >= btnRect.left()) {
-                *result = HTCLIENT;
-                return true;
-            }
+        const QPoint screenPos(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
+        if (isInTitleBarDragArea(screenPos)) {
             *result = HTCAPTION;
             return true;
         }
