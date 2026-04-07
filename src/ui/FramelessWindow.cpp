@@ -153,7 +153,7 @@ QIcon makeCloseIcon() {
 FramelessWindow::FramelessWindow(QWidget* parent)
     : QMainWindow(parent)
 {
-    setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowMinMaxButtonsHint);
+    setWindowFlags(Qt::Window | Qt::WindowMinMaxButtonsHint);
 
     // ── 根布局 ──
     auto* root = new QWidget(this);
@@ -277,7 +277,7 @@ void FramelessWindow::showEvent(QShowEvent* ev) {
         HWND hwnd = reinterpret_cast<HWND>(winId());
 
         LONG style = GetWindowLongW(hwnd, GWL_STYLE);
-        style |= WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX;
+        style |= WS_THICKFRAME | WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX;
         SetWindowLongW(hwnd, GWL_STYLE, style);
 
         COLORREF borderColor = RGB(0x33, 0x33, 0x33);
@@ -311,6 +311,11 @@ bool FramelessWindow::isInTitleBarDragArea(const QPoint& screenPos) const {
 
     if (localPos.x() < 0 || localPos.x() >= width())
         return false;
+
+    QWidget* child = childAt(localPos);
+    if (child && child != m_toolBar && child != centralWidget()) {
+        return false;
+    }
 
     const QRect btnRect = winButtonsRect();
     return !btnRect.isValid() || localPos.x() < btnRect.left();
@@ -363,17 +368,30 @@ bool FramelessWindow::nativeEvent(const QByteArray& eventType, void* message, qi
     auto* msg = static_cast<MSG*>(message);
 
     if (msg->message == WM_NCCALCSIZE) {
-        if (msg->wParam == TRUE && isWindowActuallyMaximized(msg->hwnd)) {
+        if (msg->wParam == TRUE) {
             auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(msg->lParam);
-            HMONITOR mon = MonitorFromWindow(msg->hwnd, MONITOR_DEFAULTTONEAREST);
-            MONITORINFO mi{};
-            mi.cbSize = sizeof(mi);
-            GetMonitorInfoW(mon, &mi);
-            params->rgrc[0] = mi.rcWork;
+            if (isWindowActuallyMaximized(msg->hwnd)) {
+                HMONITOR mon = MonitorFromWindow(msg->hwnd, MONITOR_DEFAULTTONEAREST);
+                MONITORINFO mi{};
+                mi.cbSize = sizeof(mi);
+                GetMonitorInfoW(mon, &mi);
+                params->rgrc[0] = mi.rcWork;
+            }
             *result = 0;
             return true;
         }
         return QMainWindow::nativeEvent(eventType, message, result);
+    }
+
+    if (msg->message == WM_NCACTIVATE) {
+        *result = TRUE;
+        return true;
+    }
+
+    if (msg->message == 0x00AE /*WM_NCUAHDRAWCAPTION*/
+        || msg->message == 0x00AF /*WM_NCUAHDRAWFRAME*/) {
+        *result = 0;
+        return true;
     }
 
     if (msg->message == WM_NCLBUTTONDOWN) {
