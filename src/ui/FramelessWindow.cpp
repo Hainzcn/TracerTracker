@@ -101,10 +101,29 @@ QIcon makeRestoreIcon() {
 
     const QRectF backRect(5.5, 3.5, 6.0, 6.0);
     const QRectF frontRect(3.5, 5.5, 6.0, 6.0);
-    painter.drawRect(backRect);
-    painter.drawRect(frontRect);
-    highlightRectCorners(painter, backRect);
-    highlightRectCorners(painter, frontRect);
+
+    painter.drawLine(QPointF(backRect.left(), backRect.top()),
+                     QPointF(backRect.right(), backRect.top()));
+    painter.drawLine(QPointF(backRect.right(), backRect.top()),
+                     QPointF(backRect.right(), backRect.bottom()));
+    painter.drawLine(QPointF(backRect.right() - 2.0, backRect.bottom()),
+                     QPointF(backRect.right(), backRect.bottom()));
+
+    painter.drawLine(QPointF(frontRect.left(), frontRect.top()),
+                     QPointF(frontRect.right(), frontRect.top()));
+    painter.drawLine(QPointF(frontRect.left(), frontRect.top()),
+                     QPointF(frontRect.left(), frontRect.bottom()));
+    painter.drawLine(QPointF(frontRect.right(), frontRect.top()),
+                     QPointF(frontRect.right(), frontRect.bottom()));
+    painter.drawLine(QPointF(frontRect.left(), frontRect.bottom()),
+                     QPointF(frontRect.right(), frontRect.bottom()));
+
+    painter.fillRect(int(backRect.left()), int(backRect.top()), 1, 1, kWindowIconCornerColor);
+    painter.fillRect(int(backRect.right()), int(backRect.top()), 1, 1, kWindowIconCornerColor);
+    painter.fillRect(int(frontRect.left()), int(frontRect.top()), 1, 1, kWindowIconCornerColor);
+    painter.fillRect(int(frontRect.right()), int(frontRect.top()), 1, 1, kWindowIconCornerColor);
+    painter.fillRect(int(frontRect.left()), int(frontRect.bottom()), 1, 1, kWindowIconCornerColor);
+    painter.fillRect(int(frontRect.right()), int(frontRect.bottom()), 1, 1, kWindowIconCornerColor);
     return QIcon(pixmap);
 }
 
