@@ -78,8 +78,9 @@ QComboBox QAbstractItemView {
     selection-background-color: #094771;
     font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
     border: 1px solid #4d4d4d; border-top: none;
+    border-top-left-radius: 0px; border-top-right-radius: 0px;
     border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;
-    outline: none; margin: 0px; padding: 0px;
+    outline: none; margin: 0px; padding: 2px 0px 0px 0px;
 }
 QComboBox QAbstractItemView::item {
     min-height: 20px; padding: 0px 8px;
@@ -255,14 +256,23 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
 
 // ── 顶栏/底栏样式 ─────────────────────────────────────────────
 
-// 顶部工具栏背景
+// 顶部工具栏背景（底边分隔线由 FramelessWindow 顶层的 1px 子控件绘制，避免被子控件盖住）
 inline QString TOP_BAR_STYLE() {
-    return "background-color: #252526; border-bottom: 1px solid #333333;";
+    return "#topBar { background-color: #252526; }";
 }
 
 // 状态栏背景
+// 使用 #statusBar 选择器限定边框只绘制在容器自身
 inline QString STATUS_BAR_STYLE() {
-    return "background-color: #252526; border-top: 1px solid #333333;";
+    return R"(
+#statusBar {
+    background-color: #252526;
+    border-top: 1px solid #333333;
+}
+#statusBar > * {
+    background: transparent;
+}
+)";
 }
 
 // ── 投影切换按钮样式 ──────────────────────────────────────────

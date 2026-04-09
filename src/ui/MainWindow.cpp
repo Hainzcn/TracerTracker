@@ -247,6 +247,7 @@ MainWindow::~MainWindow() {}
 
 void MainWindow::buildStatusBar() {
     m_statusBarWidget = new QWidget(this);
+    m_statusBarWidget->setObjectName("statusBar");
     m_statusBarWidget->setStyleSheet(Styles::STATUS_BAR_STYLE());
     m_statusBarWidget->setFixedHeight(28);
 

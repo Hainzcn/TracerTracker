@@ -145,6 +145,28 @@ std::vector<QVector3D> TrackRenderer::downsamplePath(
     return result;
 }
 
+// ── 历史压缩 ──────────────────────────────────────────────────
+
+// 当历史点数超过 FULL_PATH_RAW_MAX 时调用
+// 对旧部分（前 total - RECENT_PRESERVE）做角度降采样，保留最新部分不动
+void TrackRenderer::compactHistory(PointData& pd) {
+    size_t total = pd.history.size();
+    if ((int)total <= FULL_PATH_RAW_MAX) return;
+
+    size_t oldCount = total - RECENT_PRESERVE;
+
+    std::deque<QVector3D> oldPart(pd.history.begin(),
+                                   pd.history.begin() + static_cast<std::ptrdiff_t>(oldCount));
+    auto compacted = downsamplePath(oldPart, COMPACT_ANGLE_DEG);
+
+    std::deque<QVector3D> newHistory;
+    newHistory.insert(newHistory.end(), compacted.begin(), compacted.end());
+    for (size_t i = oldCount; i < total; ++i)
+        newHistory.push_back(pd.history[i]);
+
+    pd.history = std::move(newHistory);
+}
+
 // ── 公有接口 ──────────────────────────────────────────────────
 
 // 更新命名点的位置，追加到历史记录
@@ -154,10 +176,11 @@ void TrackRenderer::updatePoint(const QString& name, double x, double y, double 
     pd.color = color;
     pd.size  = size;
 
-    // 保持历史长度限制
     pd.history.push_back({float(x), float(y), float(z)});
-    while ((int)pd.history.size() > m_trailLength) {
-        pd.history.pop_front();
+
+    // 历史超限时压缩旧路径（保留最新 RECENT_PRESERVE 点不动）
+    if ((int)pd.history.size() > FULL_PATH_RAW_MAX) {
+        compactHistory(pd);
     }
 }
 
@@ -170,11 +193,6 @@ void TrackRenderer::setFullPathMode(bool enabled) { m_fullPathMode = enabled; }
 void TrackRenderer::setTrailMode(bool enabled)    { m_trailMode    = enabled; }
 void TrackRenderer::setTrailLength(int length) {
     m_trailLength = std::max(10, length);
-    // 截断超出新长度的历史（使用迭代器，避免 QMap 结构化绑定兼容性问题）
-    for (auto it = m_points.begin(); it != m_points.end(); ++it) {
-        auto& pd = it.value();
-        while ((int)pd.history.size() > m_trailLength) pd.history.pop_front();
-    }
 }
 
 // 渲染所有点和轨迹
@@ -200,22 +218,28 @@ void TrackRenderer::render(const QMatrix4x4& mvpMatrix) {
             std::vector<Vertex> lineVerts;
 
             if (m_trailMode) {
-                // 速度尾迹模式：基于相邻点间距估算速度，着色渐变
+                // 速度尾迹模式：仅渲染最近 m_trailLength 个点
+                size_t total = pd.history.size();
+                size_t start = (total > (size_t)m_trailLength)
+                                 ? total - m_trailLength : 0;
+                size_t len = total - start;
+
                 std::vector<float> speeds;
                 float maxSpeed = 0;
-                for (size_t i = 1; i < pd.history.size(); ++i) {
+                for (size_t i = start + 1; i < total; ++i) {
                     float d = (pd.history[i] - pd.history[i-1]).length();
                     speeds.push_back(d);
                     maxSpeed = std::max(maxSpeed, d);
                 }
                 if (maxSpeed < 1e-6f) maxSpeed = 1.0f;
 
-                for (size_t i = 0; i + 1 < pd.history.size(); ++i) {
+                for (size_t i = 0; i + 1 < len; ++i) {
+                    size_t hi = start + i;
                     float t = speeds[i] / maxSpeed;
                     QVector4D c = velocityToColor(t);
-                    float alpha = 0.3f + 0.7f * float(i) / float(pd.history.size());
-                    Vertex v0{pd.history[i].x(),   pd.history[i].y(),   pd.history[i].z(),   c.x(), c.y(), c.z(), alpha};
-                    Vertex v1{pd.history[i+1].x(), pd.history[i+1].y(), pd.history[i+1].z(), c.x(), c.y(), c.z(), alpha};
+                    float alpha = 0.3f + 0.7f * float(i) / float(len);
+                    Vertex v0{pd.history[hi].x(),   pd.history[hi].y(),   pd.history[hi].z(),   c.x(), c.y(), c.z(), alpha};
+                    Vertex v1{pd.history[hi+1].x(), pd.history[hi+1].y(), pd.history[hi+1].z(), c.x(), c.y(), c.z(), alpha};
                     lineVerts.push_back(v0);
                     lineVerts.push_back(v1);
                 }

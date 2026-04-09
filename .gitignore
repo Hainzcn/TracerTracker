@@ -3,5 +3,6 @@ build/
 dist/
 *.spec
 *.bat
+!build.bat
 .venv/
 .cursor/

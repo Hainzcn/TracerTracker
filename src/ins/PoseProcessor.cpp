@@ -278,8 +278,12 @@ void PoseProcessor::process(const QString& source, const QString& prefix,
     // ── 发射信号 ──────────────────────────────────────────────
 
     emit velocityUpdated(m_velocity[0], m_velocity[1], m_velocity[2]);
-    emit positionUpdated("Displacement Path",
-                          m_position[0], m_position[1], m_position[2]);
+
+    // ZUPT 静止时跳过路径点更新（位置不变，避免冗余点堆积）
+    if (!isStationary) {
+        emit positionUpdated("Displacement Path",
+                              m_position[0], m_position[1], m_position[2]);
+    }
 
     // 发射 Madgwick/Mahony 四元数（施加偏航修正后）
     Quat4d qMw = MathUtils::quatMultiply(m_qYawCorr, m_qMadgwick);

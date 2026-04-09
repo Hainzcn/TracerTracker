@@ -90,6 +90,14 @@ private:
     static std::vector<QVector3D> downsamplePath(const std::deque<QVector3D>& path,
                                                    float angleDegThreshold = 2.0f);
 
+    // 全路径历史管理参数
+    static constexpr int FULL_PATH_RAW_MAX = 200000;  // 触发压缩的原始点上限
+    static constexpr int RECENT_PRESERVE   = 20000;   // 压缩时保留最新点数（全分辨率）
+    static constexpr float COMPACT_ANGLE_DEG = 3.0f;  // 压缩用角度阈值（比渲染更激进）
+
+    // 当历史超过 FULL_PATH_RAW_MAX 时，对旧部分进行角度降采样压缩
+    void compactHistory(PointData& pd);
+
     // 着色器源码（GLSL 3.30）
     static const char* LINE_VERT_SRC;
     static const char* LINE_FRAG_SRC;

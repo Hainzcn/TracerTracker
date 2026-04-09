@@ -44,6 +44,7 @@ public:
 protected:
     void showEvent(QShowEvent* ev)     override;
     void changeEvent(QEvent* ev)       override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 #ifdef Q_OS_WIN
     bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
 #endif
@@ -52,6 +53,7 @@ private:
     void updateMaximizeButton();
     void updateWindowFrameState();
     void toggleMaximizeRestore();
+    void updateTopBarBottomLineGeometry();
 
 #ifdef Q_OS_WIN
     bool isWindowActuallyMaximized(HWND hwnd) const;
@@ -60,8 +62,9 @@ private:
 #endif
 
     // 顶栏
-    QWidget*     m_toolBar        = nullptr;
-    QHBoxLayout* m_toolBarLayout  = nullptr;
+    QWidget*     m_toolBar            = nullptr;
+    QHBoxLayout* m_toolBarLayout      = nullptr;
+    QWidget*     m_topBarBottomLine   = nullptr;
 
     // 窗口控制按钮
     QWidget*     m_winBtnContainer = nullptr;

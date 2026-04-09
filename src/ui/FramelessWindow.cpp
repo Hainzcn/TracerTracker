@@ -2,6 +2,12 @@
 #include "Styles.h"
 
 #include <QShowEvent>
+#include <QEvent>
+#include <QAbstractButton>
+#include <QAbstractSpinBox>
+#include <QComboBox>
+#include <QLineEdit>
+#include <QSlider>
 #include <QApplication>
 #include <QCursor>
 #include <QIcon>
@@ -165,6 +171,7 @@ FramelessWindow::FramelessWindow(QWidget* parent)
 
     // ── 顶栏 ──
     m_toolBar = new QWidget(this);
+    m_toolBar->setObjectName("topBar");
     m_toolBar->setFixedHeight(TOOLBAR_HEIGHT);
     m_toolBar->setStyleSheet(Styles::TOP_BAR_STYLE());
 
@@ -206,6 +213,14 @@ FramelessWindow::FramelessWindow(QWidget* parent)
     winLayout->addWidget(m_closeBtn);
 
     m_toolBarLayout->addWidget(m_winBtnContainer);
+
+    // 顶栏底边线与窗口按钮同高时，子控件绘制会盖住 QSS 的 border-bottom；
+    // 使用 1px 子控件置于最上层且不接收鼠标，保证整条分隔线连续（含悬停高亮）。
+    m_topBarBottomLine = new QWidget(m_toolBar);
+    m_topBarBottomLine->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    m_topBarBottomLine->setStyleSheet(
+        QStringLiteral("background-color: %1; border: none;").arg(Styles::COLOR_BORDER_DARK));
+    m_toolBar->installEventFilter(this);
 
     m_rootLayout->addWidget(m_toolBar);
 
@@ -269,8 +284,32 @@ void FramelessWindow::toggleMaximizeRestore() {
 
 // ── 事件 ─────────────────────────────────────────────────────
 
+void FramelessWindow::updateTopBarBottomLineGeometry() {
+    if (!m_toolBar || !m_topBarBottomLine)
+        return;
+    const int w = std::max(1, m_toolBar->width());
+    const int h = m_toolBar->height();
+    m_topBarBottomLine->setGeometry(0, h - 1, w, 1);
+    m_topBarBottomLine->raise();
+}
+
+bool FramelessWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_toolBar) {
+        switch (event->type()) {
+        case QEvent::Resize:
+        case QEvent::Show:
+            updateTopBarBottomLineGeometry();
+            break;
+        default:
+            break;
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
 void FramelessWindow::showEvent(QShowEvent* ev) {
     QMainWindow::showEvent(ev);
+    updateTopBarBottomLineGeometry();
 #ifdef Q_OS_WIN
     if (!m_nativeBorderSetup) {
         m_nativeBorderSetup = true;
@@ -299,6 +338,24 @@ void FramelessWindow::changeEvent(QEvent* ev) {
 }
 
 #ifdef Q_OS_WIN
+
+// 顶栏内需要接收鼠标交互的控件：对其若判为标题栏(HTCAPTION)，系统不会把点击交给 Qt。
+static bool widgetBlocksCaptionDrag(const QWidget* w) {
+    for (const QWidget* x = w; x; x = x->parentWidget()) {
+        if (qobject_cast<const QAbstractButton*>(x))
+            return true;
+        if (qobject_cast<const QComboBox*>(x))
+            return true;
+        if (qobject_cast<const QAbstractSpinBox*>(x))
+            return true;
+        if (qobject_cast<const QLineEdit*>(x))
+            return true;
+        if (qobject_cast<const QSlider*>(x))
+            return true;
+    }
+    return false;
+}
+
 bool FramelessWindow::isWindowActuallyMaximized(HWND hwnd) const {
     return hwnd && IsZoomed(hwnd);
 }
@@ -313,12 +370,21 @@ bool FramelessWindow::isInTitleBarDragArea(const QPoint& screenPos) const {
         return false;
 
     QWidget* child = childAt(localPos);
-    if (child && child != m_toolBar && child != centralWidget()) {
-        return false;
+    // childAt 命中的是最深子控件：顶栏左侧为 ToolBar/标签/下拉框等，不是 m_toolBar 自身。
+    // 须允许 m_toolBar 子树内的命中，仅靠 winButtonsRect 排除右上角系统按钮区。
+    if (child && child != centralWidget()) {
+        if (child != m_toolBar && (!m_toolBar || !m_toolBar->isAncestorOf(child)))
+            return false;
     }
 
     const QRect btnRect = winButtonsRect();
-    return !btnRect.isValid() || localPos.x() < btnRect.left();
+    if (btnRect.isValid() && localPos.x() >= btnRect.left())
+        return false;
+
+    if (child && widgetBlocksCaptionDrag(child))
+        return false;
+
+    return true;
 }
 
 void FramelessWindow::beginRestoreDrag(HWND hwnd) {
