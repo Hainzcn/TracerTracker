@@ -38,7 +38,17 @@ void ViewOrientationGizmo::updateOrientation() {
         m_elevation = float(params.value("elevation", 30.0).toDouble());
         m_azimuth   = float(params.value("azimuth",  -135.0).toDouble());
     }
+    m_endpointsDirty = true;
     update();
+}
+
+const QList<ViewOrientationGizmo::Endpoint>& ViewOrientationGizmo::cachedEndpoints() const {
+    if (m_endpointsDirty) {
+        auto* self = const_cast<ViewOrientationGizmo*>(this);
+        self->m_cachedEndpoints = buildEndpoints();
+        self->m_endpointsDirty = false;
+    }
+    return m_cachedEndpoints;
 }
 
 // 将世界单位方向投影到 gizmo 屏幕坐标（与 Viewer3D viewMatrix 相同旋转顺序）
@@ -109,7 +119,7 @@ QList<ViewOrientationGizmo::Endpoint> ViewOrientationGizmo::buildEndpoints() con
 std::optional<ViewOrientationGizmo::HitResult> ViewOrientationGizmo::hitTest(
     const QPointF& pos) const
 {
-    QList<Endpoint> eps = buildEndpoints();
+    const auto& eps = cachedEndpoints();
     // 从最前端开始检测
     for (int i = eps.size() - 1; i >= 0; --i) {
         const auto& ep = eps[i];
@@ -138,7 +148,7 @@ void ViewOrientationGizmo::paintEvent(QPaintEvent*) {
         p.drawEllipse(QPointF(cx, cy), br, br);
     }
 
-    QList<Endpoint> eps = buildEndpoints();
+    const auto& eps = cachedEndpoints();
 
     for (const auto& ep : eps) {
         QColor col = ep.color;

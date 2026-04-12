@@ -195,8 +195,8 @@ void ConfigLoader::reload() {
         QJsonDocument doc = QJsonDocument::fromJson(data, &err);
         if (err.error == QJsonParseError::NoError && doc.isObject()) {
             m_config = mergeWithDefaults(doc.object(), defaults);
+            rebuildPointsCache();
             qDebug() << "ConfigLoader: 已从" << path << "加载配置";
-            // 若合并后与文件内容不同（补充了缺失字段），则自动保存
             if (m_config != doc.object()) {
                 save();
             }
@@ -209,6 +209,7 @@ void ConfigLoader::reload() {
     }
 
     m_config = defaults;
+    rebuildPointsCache();
     save();
 }
 
@@ -349,15 +350,18 @@ InsConfig ConfigLoader::getInsConfig() const {
     return c;
 }
 
-// 获取所有数据点配置
-QList<PointConfig> ConfigLoader::getPoints() const {
+void ConfigLoader::rebuildPointsCache() {
     QJsonArray arr = m_config.value("points").toArray();
-    QList<PointConfig> result;
-    result.reserve(arr.size());
+    m_cachedPoints.clear();
+    m_cachedPoints.reserve(arr.size());
     for (const QJsonValue& v : arr) {
         if (v.isObject()) {
-            result.append(parsePointConfig(v.toObject()));
+            m_cachedPoints.append(parsePointConfig(v.toObject()));
         }
     }
-    return result;
+}
+
+// 获取所有数据点配置（返回缓存引用）
+const QList<PointConfig>& ConfigLoader::getPoints() const {
+    return m_cachedPoints;
 }

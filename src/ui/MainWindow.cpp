@@ -506,11 +506,14 @@ void MainWindow::onDataReceived(const QString& source, const QString& prefix,
         m_viewer->updatePoint(pc.name, x, y, z, pc.color, pc.size);
     }
     } // end cfg2 scope
+
+    m_viewer->update();
 }
 
 // 位置更新（来自 PoseProcessor）→ 在 Viewer3D 中绘制青色点
 void MainWindow::onPoseUpdated(const QString& name, double x, double y, double z) {
     m_viewer->updatePoint(name, x, y, z, QColor(0, 255, 255, 255), 15);
+    m_viewer->update();
 }
 
 // 速度更新 → SensorInfoOverlay
@@ -518,26 +521,21 @@ void MainWindow::onVelocityUpdated(double vx, double vy, double vz) {
     m_sensorOverlay->updateVelocity(vx, vy, vz);
 }
 
-// 线加速度更新 → SensorInfoOverlay
 void MainWindow::onParsedDataUpdated(const QString& /*source*/, const QString& /*prefix*/,
-                                      const QList<double>& linearAcc,
-                                      const QList<double>& /*gyr*/,
-                                      const QList<double>& /*mag*/)
+                                      const Vec3d& linearAcc,
+                                      const Vec3d& /*gyr*/,
+                                      const Vec3d& /*mag*/)
 {
-    if (linearAcc.size() >= 3)
-        m_sensorOverlay->updateAcceleration(linearAcc[0], linearAcc[1], linearAcc[2]);
+    m_sensorOverlay->updateAcceleration(linearAcc[0], linearAcc[1], linearAcc[2]);
 }
 
-// 滤波四元数 → AttitudeWidget
-void MainWindow::onFilterQuaternionsUpdated(const QList<double>& madgwickQ,
-                                             const QList<double>& mahonyQ)
+void MainWindow::onFilterQuaternionsUpdated(const Quat4d& madgwickQ,
+                                             const Quat4d& mahonyQ)
 {
-    if (madgwickQ.size() >= 4)
-        m_attitudeWidget->updateMadgwickQuaternion(
-            madgwickQ[0], madgwickQ[1], madgwickQ[2], madgwickQ[3]);
-    if (mahonyQ.size() >= 4)
-        m_attitudeWidget->updateMahonyQuaternion(
-            mahonyQ[0], mahonyQ[1], mahonyQ[2], mahonyQ[3]);
+    m_attitudeWidget->updateMadgwickQuaternion(
+        madgwickQ[0], madgwickQ[1], madgwickQ[2], madgwickQ[3]);
+    m_attitudeWidget->updateMahonyQuaternion(
+        mahonyQ[0], mahonyQ[1], mahonyQ[2], mahonyQ[3]);
 }
 
 void MainWindow::onPoseLog(const QString& msg)   { m_debugConsole->onPoseLog(msg); }

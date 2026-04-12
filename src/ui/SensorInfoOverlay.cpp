@@ -29,7 +29,7 @@ SensorInfoOverlay::SensorInfoOverlay(QWidget* parent)
 
     auto* layout = new QGridLayout(this);
     layout->setContentsMargins(12, 10, 12, 10);
-    layout->setHorizontalSpacing(8);
+    layout->setHorizontalSpacing(4);
     layout->setVerticalSpacing(4);
 
     const QString titleStyle =
@@ -41,42 +41,50 @@ SensorInfoOverlay::SensorInfoOverlay(QWidget* parent)
         "  background: transparent;"
         "}";
 
-    const QString valueStyle =
-        "QLabel {"
-        "  color: #e0e0e0;"
+    const QString monoBase =
         "  font-family: 'Consolas', 'JetBrains Mono', monospace;"
         "  font-size: 13px;"
-        "  background: transparent;"
-        "}";
+        "  background: transparent;";
+
+    auto makeColorLabel = [&](const QString& colorHex) -> QLabel* {
+        auto* l = new QLabel("--");
+        l->setStyleSheet(QString("QLabel { color: %1; %2 }").arg(colorHex, monoBase));
+        return l;
+    };
+
+    auto makeUnitLabel = [&]() -> QLabel* {
+        auto* l = new QLabel();
+        l->setStyleSheet(QString("QLabel { color: #888888; %1 }").arg(monoBase));
+        return l;
+    };
 
     // ── 第 0 行：ACC ──
     auto* accTitle = new QLabel("ACC");
     accTitle->setStyleSheet(titleStyle);
     layout->addWidget(accTitle, 0, 0, Qt::AlignRight | Qt::AlignVCenter);
-
-    m_accLabel = new QLabel("--");
-    m_accLabel->setStyleSheet(valueStyle);
-    layout->addWidget(m_accLabel, 0, 1, Qt::AlignLeft | Qt::AlignVCenter);
+    m_accX = makeColorLabel("#ff6b6b"); layout->addWidget(m_accX, 0, 1);
+    m_accY = makeColorLabel("#69db7c"); layout->addWidget(m_accY, 0, 2);
+    m_accZ = makeColorLabel("#4dabf7"); layout->addWidget(m_accZ, 0, 3);
+    m_accUnit = makeUnitLabel(); m_accUnit->setText("m/s\u00b2");
+    layout->addWidget(m_accUnit, 0, 4);
 
     // ── 第 1 行：VEL ──
     auto* velTitle = new QLabel("VEL");
     velTitle->setStyleSheet(titleStyle);
     layout->addWidget(velTitle, 1, 0, Qt::AlignRight | Qt::AlignVCenter);
-
-    m_velLabel = new QLabel("--");
-    m_velLabel->setStyleSheet(valueStyle);
-    layout->addWidget(m_velLabel, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+    m_velX = makeColorLabel("#ff6b6b"); layout->addWidget(m_velX, 1, 1);
+    m_velY = makeColorLabel("#69db7c"); layout->addWidget(m_velY, 1, 2);
+    m_velZ = makeColorLabel("#4dabf7"); layout->addWidget(m_velZ, 1, 3);
+    m_velUnit = makeUnitLabel(); m_velUnit->setText("m/s");
+    layout->addWidget(m_velUnit, 1, 4);
 
     // ── 第 2 行：ΔAlt ──
     auto* altTitle = new QLabel("\u0394Alt");
     altTitle->setStyleSheet(titleStyle);
     layout->addWidget(altTitle, 2, 0, Qt::AlignRight | Qt::AlignVCenter);
+    m_altVal = makeColorLabel("#fcc419"); layout->addWidget(m_altVal, 2, 1);
+    m_altDetail = makeUnitLabel(); layout->addWidget(m_altDetail, 2, 2, 1, 3);
 
-    m_altLabel = new QLabel("--");
-    m_altLabel->setStyleSheet(valueStyle);
-    layout->addWidget(m_altLabel, 2, 1, Qt::AlignLeft | Qt::AlignVCenter);
-
-    layout->setColumnStretch(1, 1);
     adjustSize();
     setVisible(false);
 }
@@ -86,9 +94,9 @@ void SensorInfoOverlay::reset() {
     m_hasData     = false;
     m_refPressure.reset();
     m_refAltitude.reset();
-    m_accLabel->setText("--");
-    m_velLabel->setText("--");
-    m_altLabel->setText("--");
+    m_accX->setText("--"); m_accY->setText("--"); m_accZ->setText("--");
+    m_velX->setText("--"); m_velY->setText("--"); m_velZ->setText("--");
+    m_altVal->setText("--"); m_altDetail->clear();
     setVisible(false);
 }
 
@@ -97,25 +105,15 @@ void SensorInfoOverlay::updateAcceleration(double ax, double ay, double az) {
         m_hasData = true;
         setVisible(true);
     }
-    m_accLabel->setText(QString(
-        "<span style='color:#ff6b6b'>%1</span> "
-        "<span style='color:#69db7c'>%2</span> "
-        "<span style='color:#4dabf7'>%3</span> "
-        "<span style='color:#888'>m/s\u00b2</span>"
-    ).arg(signedFixed(ax, 8, 2))
-     .arg(signedFixed(ay, 8, 2))
-     .arg(signedFixed(az, 8, 2)));
+    m_accX->setText(signedFixed(ax, 8, 2));
+    m_accY->setText(signedFixed(ay, 8, 2));
+    m_accZ->setText(signedFixed(az, 8, 2));
 }
 
 void SensorInfoOverlay::updateVelocity(double vx, double vy, double vz) {
-    m_velLabel->setText(QString(
-        "<span style='color:#ff6b6b'>%1</span> "
-        "<span style='color:#69db7c'>%2</span> "
-        "<span style='color:#4dabf7'>%3</span> "
-        "<span style='color:#888'>m/s</span>"
-    ).arg(signedFixed(vx, 8, 3))
-     .arg(signedFixed(vy, 8, 3))
-     .arg(signedFixed(vz, 8, 3)));
+    m_velX->setText(signedFixed(vx, 8, 3));
+    m_velY->setText(signedFixed(vy, 8, 3));
+    m_velZ->setText(signedFixed(vz, 8, 3));
 }
 
 void SensorInfoOverlay::updateAltitude(std::optional<double> pressure,
@@ -124,22 +122,16 @@ void SensorInfoOverlay::updateAltitude(std::optional<double> pressure,
         double h = altitude.value();
         if (!m_refAltitude.has_value()) m_refAltitude = h;
         double delta = h - m_refAltitude.value();
-        m_altLabel->setText(QString(
-            "<span style='color:#fcc419'>%1</span> "
-            "<span style='color:#888'>m  (%2 m)</span>"
-        ).arg(signedFixed(delta, 8, 2))
-         .arg(h, 0, 'f', 1));
+        m_altVal->setText(signedFixed(delta, 8, 2));
+        m_altDetail->setText(QString("m  (%1 m)").arg(h, 0, 'f', 1));
         return;
     }
     if (pressure.has_value() && pressure.value() > 0.0) {
         double p = pressure.value();
         if (!m_refPressure.has_value()) m_refPressure = p;
         double h = 44330.0 * (1.0 - std::pow(p / m_refPressure.value(), 1.0 / 5.255));
-        m_altLabel->setText(QString(
-            "<span style='color:#fcc419'>%1</span> "
-            "<span style='color:#888'>m  (P=%2 Pa)</span>"
-        ).arg(signedFixed(h, 8, 2))
-         .arg(p, 0, 'f', 0));
+        m_altVal->setText(signedFixed(h, 8, 2));
+        m_altDetail->setText(QString("m  (P=%1 Pa)").arg(p, 0, 'f', 0));
     }
 }
 

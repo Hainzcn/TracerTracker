@@ -492,7 +492,6 @@ void Viewer3D::animateToView(double elevation, double azimuth) {
 void Viewer3D::updatePoint(const QString& name, double x, double y, double z,
                              const QColor& color, int size) {
     if (m_trackRenderer) m_trackRenderer->updatePoint(name, x, y, z, color, size);
-    update();
 }
 
 void Viewer3D::clearAll() {

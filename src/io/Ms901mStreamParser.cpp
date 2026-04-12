@@ -36,6 +36,7 @@ int32_t Ms901mStreamParser::toInt32(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t 
 // 每个 0x03 帧触发一次快照合并
 QList<Snapshot19> Ms901mStreamParser::feed(const QByteArray& data) {
     m_buffer.append(data);
+    m_parseOffset = 0;
     QList<Snapshot19> snapshots;
 
     while (true) {
@@ -49,7 +50,12 @@ QList<Snapshot19> Ms901mStreamParser::feed(const QByteArray& data) {
         }
     }
 
-    // 防止缓冲区无限增长（保留最后 2048 字节）
+    // 紧缩：一次性丢弃已消费的前缀
+    if (m_parseOffset > 0) {
+        m_buffer = m_buffer.mid(m_parseOffset);
+        m_parseOffset = 0;
+    }
+
     if (m_buffer.size() > 4096) {
         m_buffer = m_buffer.right(2048);
     }
@@ -57,63 +63,49 @@ QList<Snapshot19> Ms901mStreamParser::feed(const QByteArray& data) {
     return snapshots;
 }
 
-// 从缓冲区头部提取一个完整有效帧
-// 自动跳过无效字节直到找到帧头 0x55 0x55
+// 从缓冲区头部提取一个完整有效帧（游标模式，减少 mid() 拷贝）
 bool Ms901mStreamParser::tryExtractFrame(uint8_t& frameId, QByteArray& payload) {
     while (true) {
-        // 在缓冲区中寻找帧头 0x55 0x55
-        int idx = -1;
-        for (int i = 0; i + 1 < m_buffer.size(); ++i) {
-            if ((uint8_t)m_buffer[i] == 0x55 && (uint8_t)m_buffer[i+1] == 0x55) {
-                idx = i;
-                break;
-            }
-        }
+        int bufSize = m_buffer.size();
+        const char* buf = m_buffer.constData();
+
+        static const QByteArray syncWord("\x55\x55", 2);
+        int idx = m_buffer.indexOf(syncWord, m_parseOffset);
 
         if (idx < 0) {
-            // 未找到帧头，保留最后 1 字节（可能是不完整帧头）
-            if (m_buffer.size() > 1)
-                m_buffer = m_buffer.right(1);
+            m_parseOffset = std::max(0, bufSize - 1);
             return false;
         }
 
-        // 丢弃帧头前的垃圾字节
-        if (idx > 0) m_buffer = m_buffer.mid(idx);
+        m_parseOffset = idx;
 
-        // 需要至少 4 字节（帧头2 + ID1 + LEN1）
-        if (m_buffer.size() < 4) return false;
+        if (bufSize - idx < 4) return false;
 
-        uint8_t fid    = (uint8_t)m_buffer[2];
-        uint8_t dataLen= (uint8_t)m_buffer[3];
-        int     total  = 4 + dataLen + 1; // 帧头2 + ID1 + LEN1 + DATA + CHECKSUM1
+        uint8_t fid     = (uint8_t)buf[idx + 2];
+        uint8_t dataLen = (uint8_t)buf[idx + 3];
+        int     total   = 4 + dataLen + 1;
 
-        // 数据长度异常（>64）跳过当前帧头
         if (dataLen > 64) {
-            m_buffer = m_buffer.mid(2);
+            m_parseOffset = idx + 2;
             continue;
         }
 
-        // 缓冲区数据不足，等待更多数据
-        if (m_buffer.size() < total) return false;
+        if (bufSize - idx < total) return false;
 
-        // 校验和验证：sum(帧头到DATA末尾) & 0xFF
         uint8_t sum = 0;
-        for (int i = 0; i < total - 1; ++i)
-            sum += (uint8_t)m_buffer[i];
+        for (int i = idx; i < idx + total - 1; ++i)
+            sum += (uint8_t)buf[i];
 
-        uint8_t expected = sum;
-        uint8_t actual   = (uint8_t)m_buffer[total - 1];
+        uint8_t actual = (uint8_t)buf[idx + total - 1];
 
-        if (expected != actual) {
-            // 校验失败：丢弃 2 个字节（跳过当前帧头），继续搜索
-            m_buffer = m_buffer.mid(2);
+        if (sum != actual) {
+            m_parseOffset = idx + 2;
             continue;
         }
 
-        // 提取载荷（data 段）
         frameId = fid;
-        payload = m_buffer.mid(4, dataLen);
-        m_buffer = m_buffer.mid(total); // 消费整帧
+        payload = m_buffer.mid(idx + 4, dataLen);
+        m_parseOffset = idx + total;
         return true;
     }
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <tuple>
+#include <QMetaType>
 
 // ============================================================
 // MathUtils.h — INS 基础数学工具
@@ -11,6 +12,9 @@
 using Quat4d  = std::array<double, 4>;
 // 三维向量类型别名：[x, y, z]
 using Vec3d   = std::array<double, 3>;
+
+Q_DECLARE_METATYPE(Vec3d)
+Q_DECLARE_METATYPE(Quat4d)
 
 namespace MathUtils {
 
@@ -31,6 +35,6 @@ Vec3d rotateVector(const Vec3d& v, const Quat4d& q);
 
 // 四元数归一化（防止数值累积漂移）
 // 原地修改并返回归一化后的四元数
-Quat4d normalize(Quat4d q);
+Quat4d normalize(const Quat4d& q);
 
 } // namespace MathUtils

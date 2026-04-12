@@ -32,8 +32,8 @@ public:
     // 获取 INS（惯性导航系统）配置
     InsConfig         getInsConfig() const;
 
-    // 获取全部数据点配置列表
-    QList<PointConfig> getPoints() const;
+    // 获取全部数据点配置列表（缓存，仅 reload 时重新解析）
+    const QList<PointConfig>& getPoints() const;
 
     // 获取重力参考值（m/s²）
     double gravityReference() const;
@@ -70,4 +70,8 @@ private:
 
     // 当前配置（已与默认值合并的 JSON 根对象）
     QJsonObject m_config;
+
+    // 缓存的点配置列表（在 reload 时刷新）
+    QList<PointConfig> m_cachedPoints;
+    void rebuildPointsCache();
 };

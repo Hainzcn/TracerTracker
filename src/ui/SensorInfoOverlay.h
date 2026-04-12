@@ -39,9 +39,10 @@ protected:
     void wheelEvent(QWheelEvent* ev)       override;
 
 private:
-    QLabel* m_accLabel  = nullptr;
-    QLabel* m_velLabel  = nullptr;
-    QLabel* m_altLabel  = nullptr;
+    // 每行用独立 QLabel 逐段着色，避免 HTML 解析开销
+    QLabel* m_accX = nullptr;  QLabel* m_accY = nullptr;  QLabel* m_accZ = nullptr;  QLabel* m_accUnit = nullptr;
+    QLabel* m_velX = nullptr;  QLabel* m_velY = nullptr;  QLabel* m_velZ = nullptr;  QLabel* m_velUnit = nullptr;
+    QLabel* m_altVal = nullptr; QLabel* m_altDetail = nullptr;
 
     std::optional<double> m_refPressure;
     std::optional<double> m_refAltitude;

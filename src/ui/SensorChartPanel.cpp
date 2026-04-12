@@ -176,29 +176,31 @@ void SensorChartPanel::drawSection(QPainter& p, const QRectF& sectionRect,
     p.setPen(QPen(lineColor, 1));
     p.drawLine(QPointF(chartRect.left(), midY), QPointF(chartRect.right(), midY));
 
-    // 收集所有有效历史数据
-    std::vector<std::vector<double>> seriesData;
-    for (const auto* d : history) {
-        if (!d->empty()) seriesData.push_back({d->begin(), d->end()});
+    // 收集有效系列的指针（避免拷贝 deque）
+    std::vector<const std::deque<double>*> validSeries;
+    std::vector<size_t> validColorIdx;
+    for (size_t i = 0; i < history.size(); ++i) {
+        if (!history[i]->empty()) {
+            validSeries.push_back(history[i]);
+            validColorIdx.push_back(i);
+        }
     }
-    if (seriesData.empty()) return;
+    if (validSeries.empty()) return;
 
     // 计算 Y 轴映射函数
     std::function<double(double)> valueToY;
     if (centered) {
-        // 双轴对称：以最大绝对值缩放
         double maxAbs = 1.0;
-        for (const auto& s : seriesData)
-            for (double v : s) maxAbs = std::max(maxAbs, std::abs(v));
+        for (const auto* s : validSeries)
+            for (double v : *s) maxAbs = std::max(maxAbs, std::abs(v));
         double amplitude = chartRect.height() * 0.42;
         valueToY = [=](double v) -> double {
             return chartRect.center().y() - (v / maxAbs) * amplitude;
         };
     } else {
-        // 单边：按实际范围缩放
         double minVal = 1e18, maxVal = -1e18;
-        for (const auto& s : seriesData)
-            for (double v : s) { minVal = std::min(minVal, v); maxVal = std::max(maxVal, v); }
+        for (const auto* s : validSeries)
+            for (double v : *s) { minVal = std::min(minVal, v); maxVal = std::max(maxVal, v); }
         if (maxVal - minVal < 1e-6) { minVal -= 0.5; maxVal += 0.5; }
         double pad = std::max((maxVal - minVal) * 0.08, 0.2);
         minVal -= pad; maxVal += pad;
@@ -208,11 +210,9 @@ void SensorChartPanel::drawSection(QPainter& p, const QRectF& sectionRect,
         };
     }
 
-    // 绘制各轴折线
-    for (size_t si = 0; si < seriesData.size() && si < colors.size(); ++si) {
-        const auto& data = seriesData[si];
-        if (data.empty()) continue;
-
+    // 绘制各轴折线（直接从 deque 读取，无拷贝）
+    for (size_t si = 0; si < validSeries.size(); ++si) {
+        const auto& data = *validSeries[si];
         QPainterPath path;
         for (size_t idx = 0; idx < data.size(); ++idx) {
             double x = chartRect.left() + chartRect.width() * idx / std::max(HISTORY_LEN - 1, 1);
@@ -220,7 +220,7 @@ void SensorChartPanel::drawSection(QPainter& p, const QRectF& sectionRect,
             if (idx == 0) path.moveTo(x, y);
             else          path.lineTo(x, y);
         }
-        p.setPen(QPen(colors[si], 1));
+        p.setPen(QPen(colors[validColorIdx[si]], 1));
         p.setBrush(Qt::NoBrush);
         p.drawPath(path);
     }

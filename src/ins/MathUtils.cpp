@@ -8,10 +8,10 @@
 namespace MathUtils {
 
 // 四元数归一化
-Quat4d normalize(Quat4d q) {
+Quat4d normalize(const Quat4d& q) {
     double n = std::sqrt(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3]);
     if (n > 1e-12) {
-        q[0] /= n; q[1] /= n; q[2] /= n; q[3] /= n;
+        return {q[0]/n, q[1]/n, q[2]/n, q[3]/n};
     }
     return q;
 }

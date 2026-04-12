@@ -199,9 +199,10 @@ void SerialWorker::stopReceiving() {
 void SerialWorker::onCsvReadyRead() {
     if (!m_serial) return;
     QByteArray raw = m_serial->readAll();
-    emit rawDataReceived("serial", QString::fromUtf8(raw).trimmed());
+    QString text = QString::fromUtf8(raw);
+    emit rawDataReceived("serial", text.trimmed());
 
-    m_csvLineBuffer += QString::fromUtf8(raw);
+    m_csvLineBuffer += text;
     while (true) {
         int pos = m_csvLineBuffer.indexOf('\n');
         if (pos < 0) break;

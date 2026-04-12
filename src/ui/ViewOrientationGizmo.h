@@ -82,6 +82,10 @@ private:
     std::optional<HitResult> m_pressedHit;
     std::optional<QPointF>   m_lastMousePos;
 
+    QList<Endpoint> m_cachedEndpoints;
+    bool m_endpointsDirty = true;
+    const QList<Endpoint>& cachedEndpoints() const;
+
     static constexpr int   SIZE           = 90;
     static constexpr float AXIS_LENGTH    = 0.65f;
     static constexpr float BASE_RADIUS    = 7.0f;

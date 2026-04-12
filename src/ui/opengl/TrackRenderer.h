@@ -7,7 +7,7 @@
 #include <QVector3D>
 #include <QColor>
 #include <QString>
-#include <QMap>
+#include <QHash>
 #include <deque>
 #include <vector>
 
@@ -60,7 +60,7 @@ public:
         QColor color;                  // 点颜色
         int    size;                   // 点大小
     };
-    const QMap<QString, PointData>& points() const { return m_points; }
+    const QHash<QString, PointData>& points() const { return m_points; }
 
 private:
     QOpenGLFunctions_3_3_Core* m_gl;     // OpenGL 函数指针
@@ -70,18 +70,27 @@ private:
     // 点渲染着色器（支持 gl_PointSize）
     QOpenGLShaderProgram m_pointShader;
 
-    QOpenGLBuffer            m_vbo;       // 顶点缓冲
-    QOpenGLVertexArrayObject m_vao;       // 顶点数组对象
+    QOpenGLBuffer            m_lineVbo;   // 线段顶点缓冲
+    QOpenGLVertexArrayObject m_lineVao;   // 线段顶点数组
+    QOpenGLBuffer            m_pointVbo;  // 点顶点缓冲
+    QOpenGLVertexArrayObject m_pointVao;  // 点顶点数组
 
     bool m_initialized    = false;
     bool m_fullPathMode   = false;  // 全路径显示开关
     bool m_trailMode      = false;  // 速度尾迹显示开关
     int  m_trailLength    = 120;    // 历史长度
 
-    QMap<QString, PointData> m_points;  // 各命名点的数据
+    QHash<QString, PointData> m_points;  // 各命名点的数据
+    bool m_dirty = false;               // 数据变更标记，延迟到 render 时重建
 
     // 线段顶点格式：[x,y,z, r,g,b,a]
     struct Vertex { float x, y, z, r, g, b, a; };
+
+    // 缓存的顶点数组（仅在 dirty 时重建）
+    std::vector<Vertex> m_cachedLineVerts;
+    struct CachedPoint { Vertex v; float size; };
+    std::vector<CachedPoint> m_cachedPoints;
+    bool m_vboNeedsUpload = false;
 
     // 将速度标量映射到颜色（蓝→青→绿→黄→红，0.0=最低，1.0=最高）
     static QVector4D velocityToColor(float t);
@@ -97,6 +106,9 @@ private:
 
     // 当历史超过 FULL_PATH_RAW_MAX 时，对旧部分进行角度降采样压缩
     void compactHistory(PointData& pd);
+
+    // 数据变更时重建缓存的顶点数组
+    void rebuildCache();
 
     // 着色器源码（GLSL 3.30）
     static const char* LINE_VERT_SRC;

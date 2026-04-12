@@ -25,7 +25,8 @@ double LowPassFilter::update(double raw) {
     if (!m_value.has_value()) {
         m_value = raw;
     } else {
-        m_value = m_alpha * raw + (1.0 - m_alpha) * m_value.value();
+        double prev = m_value.value();
+        m_value = m_alpha * raw + (1.0 - m_alpha) * prev;
     }
     return m_value.value();
 }
@@ -158,13 +159,18 @@ void ZUPTDetector::reset() {
     m_gyroBuffer.clear();
 }
 
-// 计算滑动窗口方差
+// Welford 单遍在线方差
 double ZUPTDetector::computeVariance(const std::deque<double>& buf) {
     if (buf.empty()) return 0.0;
-    double mean = std::accumulate(buf.begin(), buf.end(), 0.0) / buf.size();
-    double var  = 0.0;
-    for (double v : buf) var += (v - mean) * (v - mean);
-    return var / buf.size();
+    double mean = 0.0, m2 = 0.0;
+    size_t n = 0;
+    for (double v : buf) {
+        ++n;
+        double delta = v - mean;
+        mean += delta / double(n);
+        m2 += delta * (v - mean);
+    }
+    return m2 / double(n);
 }
 
 // 更新检测器，若窗口满且两个方差均低于阈值则返回 true（静止）

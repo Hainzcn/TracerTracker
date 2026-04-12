@@ -175,12 +175,10 @@ void PoseProcessor::process(const QString& source, const QString& prefix,
     if (hasGravity) {
         // ── AHRS 更新 ──────────────────────────────────────────
         if (quatVec.has_value()) {
-            // 直接使用传感器模块提供的四元数
             m_q = quatVec.value();
             m_initialized = true;
             if (shouldLog) debugMsgs << "Q: 模块直出";
         } else if (gyrVec.has_value()) {
-            // 使用 Madgwick/Mahony 计算主四元数
             const Vec3d& gyr = gyrVec.value();
             if (magVec.has_value()) {
                 m_q = Ahrs::madgwickUpdate9dof(m_q, gyr, acc, magVec.value(), dt, m_beta);
@@ -189,18 +187,19 @@ void PoseProcessor::process(const QString& source, const QString& prefix,
             }
         }
 
-        // 同时运行独立 Madgwick 和 Mahony 用于姿态显示
+        // 独立运行 Madgwick/Mahony 显示四元数（复用主 Madgwick 结果，仅额外计算 Mahony）
         if (gyrVec.has_value()) {
             const Vec3d& gyr = gyrVec.value();
+            m_qMadgwick = m_q;
             if (magVec.has_value()) {
-                m_qMadgwick = Ahrs::madgwickUpdate9dof(m_qMadgwick, gyr, acc, magVec.value(), dt, m_beta);
-                m_qMahony   = Ahrs::mahonyUpdate9dof(m_qMahony, gyr, acc, magVec.value(), dt,
-                                                      m_mahonyKp, m_mahonyKi, &m_mahonyIntegralFb);
+                m_qMahony = Ahrs::mahonyUpdate9dof(m_qMahony, gyr, acc, magVec.value(), dt,
+                                                    m_mahonyKp, m_mahonyKi, &m_mahonyIntegralFb);
             } else {
-                m_qMadgwick = Ahrs::madgwickUpdate6dof(m_qMadgwick, gyr, acc, dt, m_beta);
-                m_qMahony   = Ahrs::mahonyUpdate6dof(m_qMahony, gyr, acc, dt,
-                                                      m_mahonyKp, m_mahonyKi, &m_mahonyIntegralFb);
+                m_qMahony = Ahrs::mahonyUpdate6dof(m_qMahony, gyr, acc, dt,
+                                                    m_mahonyKp, m_mahonyKi, &m_mahonyIntegralFb);
             }
+        } else if (quatVec.has_value()) {
+            m_qMadgwick = m_q;
         }
 
         // 将加速度旋转到世界坐标系，剥离重力
@@ -217,12 +216,9 @@ void PoseProcessor::process(const QString& source, const QString& prefix,
         }
     }
 
-    // 发射已解析的传感器数据
-    QList<double> linAccList = {linearAcc[0], linearAcc[1], linearAcc[2]};
-    QList<double> gyrList, magList;
-    if (gyrVec.has_value()) for (double v : gyrVec.value()) gyrList << v;
-    if (magVec.has_value()) for (double v : magVec.value()) magList << v;
-    emit parsedDataUpdated(source, prefix, linAccList, gyrList, magList);
+    Vec3d gyrOut = gyrVec.value_or(Vec3d{0,0,0});
+    Vec3d magOut = magVec.value_or(Vec3d{0,0,0});
+    emit parsedDataUpdated(source, prefix, linearAcc, gyrOut, magOut);
 
     // ── ZUPT 零速检测 ─────────────────────────────────────────
     bool isStationary = false;
@@ -285,10 +281,7 @@ void PoseProcessor::process(const QString& source, const QString& prefix,
                               m_position[0], m_position[1], m_position[2]);
     }
 
-    // 发射 Madgwick/Mahony 四元数（施加偏航修正后）
     Quat4d qMw = MathUtils::quatMultiply(m_qYawCorr, m_qMadgwick);
     Quat4d qMh = MathUtils::quatMultiply(m_qYawCorr, m_qMahony);
-    QList<double> madgwickList = {qMw[0], qMw[1], qMw[2], qMw[3]};
-    QList<double> mahonyList   = {qMh[0], qMh[1], qMh[2], qMh[3]};
-    emit filterQuaternionsUpdated(madgwickList, mahonyList);
+    emit filterQuaternionsUpdated(qMw, qMh);
 }

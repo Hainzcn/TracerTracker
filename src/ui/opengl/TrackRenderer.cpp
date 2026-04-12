@@ -64,7 +64,8 @@ void main() {
 
 TrackRenderer::TrackRenderer(QOpenGLFunctions_3_3_Core* gl)
     : m_gl(gl)
-    , m_vbo(QOpenGLBuffer::VertexBuffer)
+    , m_lineVbo(QOpenGLBuffer::VertexBuffer)
+    , m_pointVbo(QOpenGLBuffer::VertexBuffer)
 {}
 
 TrackRenderer::~TrackRenderer() {}
@@ -83,22 +84,37 @@ void TrackRenderer::initialize() {
     m_pointShader.addShaderFromSourceCode(QOpenGLShader::Fragment, POINT_FRAG_SRC);
     m_pointShader.link();
 
-    // 创建 VAO 和 VBO（线段/点共用同一个 VBO，按需上传）
-    m_vao.create();
-    m_vao.bind();
-    m_vbo.create();
-    m_vbo.bind();
-    m_vbo.setUsagePattern(QOpenGLBuffer::StreamDraw);
-
     constexpr int stride = 7 * sizeof(float);
+
+    // 线段 VAO/VBO
+    m_lineVao.create();
+    m_lineVao.bind();
+    m_lineVbo.create();
+    m_lineVbo.bind();
+    m_lineVbo.setUsagePattern(QOpenGLBuffer::DynamicDraw);
     m_gl->glEnableVertexAttribArray(0);
     m_gl->glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride,
                                  reinterpret_cast<void*>(0));
     m_gl->glEnableVertexAttribArray(1);
     m_gl->glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride,
                                  reinterpret_cast<void*>(3 * sizeof(float)));
-    m_vao.release();
-    m_vbo.release();
+    m_lineVao.release();
+    m_lineVbo.release();
+
+    // 点 VAO/VBO
+    m_pointVao.create();
+    m_pointVao.bind();
+    m_pointVbo.create();
+    m_pointVbo.bind();
+    m_pointVbo.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+    m_gl->glEnableVertexAttribArray(0);
+    m_gl->glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride,
+                                 reinterpret_cast<void*>(0));
+    m_gl->glEnableVertexAttribArray(1);
+    m_gl->glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride,
+                                 reinterpret_cast<void*>(3 * sizeof(float)));
+    m_pointVao.release();
+    m_pointVbo.release();
 
     m_initialized = true;
 }
@@ -178,32 +194,33 @@ void TrackRenderer::updatePoint(const QString& name, double x, double y, double 
 
     pd.history.push_back({float(x), float(y), float(z)});
 
-    // 历史超限时压缩旧路径（保留最新 RECENT_PRESERVE 点不动）
     if ((int)pd.history.size() > FULL_PATH_RAW_MAX) {
         compactHistory(pd);
     }
+
+    m_dirty = true;
 }
 
 // 清除所有点和轨迹历史
 void TrackRenderer::clearAll() {
     m_points.clear();
+    m_cachedLineVerts.clear();
+    m_cachedPoints.clear();
+    m_dirty = true;
 }
 
-void TrackRenderer::setFullPathMode(bool enabled) { m_fullPathMode = enabled; }
-void TrackRenderer::setTrailMode(bool enabled)    { m_trailMode    = enabled; }
+void TrackRenderer::setFullPathMode(bool enabled) { m_fullPathMode = enabled; m_dirty = true; }
+void TrackRenderer::setTrailMode(bool enabled)    { m_trailMode    = enabled; m_dirty = true; }
 void TrackRenderer::setTrailLength(int length) {
     m_trailLength = std::max(10, length);
+    m_dirty = true;
 }
 
-// 渲染所有点和轨迹
-void TrackRenderer::render(const QMatrix4x4& mvpMatrix) {
-    if (!m_initialized || m_points.isEmpty()) return;
+// 当数据变更时重建缓存的顶点数组
+void TrackRenderer::rebuildCache() {
+    m_cachedLineVerts.clear();
+    m_cachedPoints.clear();
 
-    m_gl->glEnable(GL_BLEND);
-    m_gl->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    m_gl->glEnable(GL_PROGRAM_POINT_SIZE);
-
-    // 使用传统迭代器遍历，避免 QMap structured binding 兼容性问题
     for (auto it = m_points.cbegin(); it != m_points.cend(); ++it) {
         const PointData& pd = it.value();
         if (pd.history.empty()) continue;
@@ -213,12 +230,8 @@ void TrackRenderer::render(const QMatrix4x4& mvpMatrix) {
         float cb = float(pd.color.blueF());
         float ca = float(pd.color.alphaF());
 
-        // ── 绘制轨迹线 ──────────────────────────────────────
         if ((m_fullPathMode || m_trailMode) && pd.history.size() >= 2) {
-            std::vector<Vertex> lineVerts;
-
             if (m_trailMode) {
-                // 速度尾迹模式：仅渲染最近 m_trailLength 个点
                 size_t total = pd.history.size();
                 size_t start = (total > (size_t)m_trailLength)
                                  ? total - m_trailLength : 0;
@@ -238,52 +251,67 @@ void TrackRenderer::render(const QMatrix4x4& mvpMatrix) {
                     float t = speeds[i] / maxSpeed;
                     QVector4D c = velocityToColor(t);
                     float alpha = 0.3f + 0.7f * float(i) / float(len);
-                    Vertex v0{pd.history[hi].x(),   pd.history[hi].y(),   pd.history[hi].z(),   c.x(), c.y(), c.z(), alpha};
-                    Vertex v1{pd.history[hi+1].x(), pd.history[hi+1].y(), pd.history[hi+1].z(), c.x(), c.y(), c.z(), alpha};
-                    lineVerts.push_back(v0);
-                    lineVerts.push_back(v1);
+                    m_cachedLineVerts.push_back({pd.history[hi].x(),   pd.history[hi].y(),   pd.history[hi].z(),   c.x(), c.y(), c.z(), alpha});
+                    m_cachedLineVerts.push_back({pd.history[hi+1].x(), pd.history[hi+1].y(), pd.history[hi+1].z(), c.x(), c.y(), c.z(), alpha});
                 }
             } else {
-                // 全路径模式：降采样后统一颜色绘制
                 auto sampled = downsamplePath(pd.history, 1.5f);
                 for (size_t i = 0; i + 1 < sampled.size(); ++i) {
                     float alpha = 0.3f + 0.7f * float(i) / float(sampled.size());
-                    Vertex v0{sampled[i].x(),   sampled[i].y(),   sampled[i].z(),   cr, cg, cb, alpha};
-                    Vertex v1{sampled[i+1].x(), sampled[i+1].y(), sampled[i+1].z(), cr, cg, cb, alpha};
-                    lineVerts.push_back(v0);
-                    lineVerts.push_back(v1);
+                    m_cachedLineVerts.push_back({sampled[i].x(),   sampled[i].y(),   sampled[i].z(),   cr, cg, cb, alpha});
+                    m_cachedLineVerts.push_back({sampled[i+1].x(), sampled[i+1].y(), sampled[i+1].z(), cr, cg, cb, alpha});
                 }
-            }
-
-            if (!lineVerts.empty()) {
-                m_vbo.bind();
-                m_vbo.allocate(lineVerts.data(),
-                                static_cast<int>(lineVerts.size() * sizeof(Vertex)));
-                m_lineShader.bind();
-                m_lineShader.setUniformValue("mvpMatrix", mvpMatrix);
-                m_vao.bind();
-                m_gl->glLineWidth(1.5f);
-                m_gl->glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(lineVerts.size()));
-                m_vao.release();
-                m_lineShader.release();
-                m_vbo.release();
             }
         }
 
-        // ── 绘制当前位置点 ────────────────────────────────────
         const QVector3D& pos = pd.history.back();
-        Vertex pv{pos.x(), pos.y(), pos.z(), cr, cg, cb, ca};
-        m_vbo.bind();
-        m_vbo.allocate(&pv, static_cast<int>(sizeof(Vertex)));
-        m_pointShader.bind();
-        m_pointShader.setUniformValue("mvpMatrix", mvpMatrix);
-        m_pointShader.setUniformValue("pointSize", float(pd.size));
-        m_vao.bind();
-        m_gl->glDrawArrays(GL_POINTS, 0, 1);
-        m_vao.release();
-        m_pointShader.release();
-        m_vbo.release();
+        m_cachedPoints.push_back({{pos.x(), pos.y(), pos.z(), cr, cg, cb, ca}, float(pd.size)});
     }
 
+    m_vboNeedsUpload = true;
+    m_dirty = false;
+}
+
+// 渲染所有点和轨迹
+void TrackRenderer::render(const QMatrix4x4& mvpMatrix) {
+    if (!m_initialized || m_points.isEmpty()) return;
+
+    if (m_dirty) rebuildCache();
+
+    m_gl->glEnable(GL_BLEND);
+    m_gl->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    m_gl->glEnable(GL_PROGRAM_POINT_SIZE);
+
+    if (!m_cachedLineVerts.empty()) {
+        m_lineVbo.bind();
+        if (m_vboNeedsUpload)
+            m_lineVbo.allocate(m_cachedLineVerts.data(),
+                               static_cast<int>(m_cachedLineVerts.size() * sizeof(Vertex)));
+        m_lineShader.bind();
+        m_lineShader.setUniformValue("mvpMatrix", mvpMatrix);
+        m_lineVao.bind();
+        m_gl->glLineWidth(1.5f);
+        m_gl->glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(m_cachedLineVerts.size()));
+        m_lineVao.release();
+        m_lineShader.release();
+        m_lineVbo.release();
+    }
+
+    if (!m_cachedPoints.empty()) {
+        m_pointShader.bind();
+        m_pointShader.setUniformValue("mvpMatrix", mvpMatrix);
+        m_pointVao.bind();
+        for (const auto& cp : m_cachedPoints) {
+            m_pointVbo.bind();
+            m_pointVbo.allocate(&cp.v, static_cast<int>(sizeof(Vertex)));
+            m_pointShader.setUniformValue("pointSize", cp.size);
+            m_gl->glDrawArrays(GL_POINTS, 0, 1);
+            m_pointVbo.release();
+        }
+        m_pointVao.release();
+        m_pointShader.release();
+    }
+
+    m_vboNeedsUpload = false;
     m_gl->glDisable(GL_PROGRAM_POINT_SIZE);
 }

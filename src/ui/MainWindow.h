@@ -1,5 +1,6 @@
 #pragma once
 #include "FramelessWindow.h"
+#include "ins/MathUtils.h"
 #include <QLabel>
 #include <QCheckBox>
 #include <QSpinBox>
@@ -57,14 +58,12 @@ private slots:
     void onPoseUpdated(const QString& name, double x, double y, double z);
     // 速度更新 → 更新 SensorInfoOverlay
     void onVelocityUpdated(double vx, double vy, double vz);
-    // 滤波四元数更新 → 更新 AttitudeWidget
-    void onFilterQuaternionsUpdated(const QList<double>& madgwickQ,
-                                    const QList<double>& mahonyQ);
-    // PoseProcessor 解析数据信号
+    void onFilterQuaternionsUpdated(const Quat4d& madgwickQ,
+                                    const Quat4d& mahonyQ);
     void onParsedDataUpdated(const QString& source, const QString& prefix,
-                             const QList<double>& linearAcc,
-                             const QList<double>& gyr,
-                             const QList<double>& mag);
+                             const Vec3d& linearAcc,
+                             const Vec3d& gyr,
+                             const Vec3d& mag);
     // 日志消息转发
     void onPoseLog(const QString& msg);
     void onViewerLog(const QString& msg);

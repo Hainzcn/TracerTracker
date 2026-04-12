@@ -287,24 +287,29 @@ void GridRenderer::buildGridPlane(int planeIdx, float spacing, float halfExtent,
         float a = baseA * alphaMult;
 
         if (doFade) {
-            // line along U direction, split into 3 segments
-            // segment 1: [-halfExtent, -fadeRadius] alpha 0 -> a
-            m_lineVerts.push_back({makePoint(-halfExtent, coord).x(), makePoint(-halfExtent, coord).y(), makePoint(-halfExtent, coord).z(), baseR, baseG, baseB, 0.0f});
-            m_lineVerts.push_back({makePoint(-fadeRadius, coord).x(), makePoint(-fadeRadius, coord).y(), makePoint(-fadeRadius, coord).z(), baseR, baseG, baseB, a});
-            // segment 2: [-fadeRadius, fadeRadius] full alpha
-            m_lineVerts.push_back({makePoint(-fadeRadius, coord).x(), makePoint(-fadeRadius, coord).y(), makePoint(-fadeRadius, coord).z(), baseR, baseG, baseB, a});
-            m_lineVerts.push_back({makePoint( fadeRadius, coord).x(), makePoint( fadeRadius, coord).y(), makePoint( fadeRadius, coord).z(), baseR, baseG, baseB, a});
-            // segment 3: [fadeRadius, halfExtent] alpha a -> 0
-            m_lineVerts.push_back({makePoint( fadeRadius, coord).x(), makePoint( fadeRadius, coord).y(), makePoint( fadeRadius, coord).z(), baseR, baseG, baseB, a});
-            m_lineVerts.push_back({makePoint( halfExtent, coord).x(), makePoint( halfExtent, coord).y(), makePoint( halfExtent, coord).z(), baseR, baseG, baseB, 0.0f});
+            QVector3D pNegExt = makePoint(-halfExtent, coord);
+            QVector3D pNegFade = makePoint(-fadeRadius, coord);
+            QVector3D pPosFade = makePoint( fadeRadius, coord);
+            QVector3D pPosExt = makePoint( halfExtent, coord);
 
-            // line along V direction, split into 3 segments
-            m_lineVerts.push_back({makePoint(coord, -halfExtent).x(), makePoint(coord, -halfExtent).y(), makePoint(coord, -halfExtent).z(), baseR, baseG, baseB, 0.0f});
-            m_lineVerts.push_back({makePoint(coord, -fadeRadius).x(), makePoint(coord, -fadeRadius).y(), makePoint(coord, -fadeRadius).z(), baseR, baseG, baseB, a});
-            m_lineVerts.push_back({makePoint(coord, -fadeRadius).x(), makePoint(coord, -fadeRadius).y(), makePoint(coord, -fadeRadius).z(), baseR, baseG, baseB, a});
-            m_lineVerts.push_back({makePoint(coord,  fadeRadius).x(), makePoint(coord,  fadeRadius).y(), makePoint(coord,  fadeRadius).z(), baseR, baseG, baseB, a});
-            m_lineVerts.push_back({makePoint(coord,  fadeRadius).x(), makePoint(coord,  fadeRadius).y(), makePoint(coord,  fadeRadius).z(), baseR, baseG, baseB, a});
-            m_lineVerts.push_back({makePoint(coord,  halfExtent).x(), makePoint(coord,  halfExtent).y(), makePoint(coord,  halfExtent).z(), baseR, baseG, baseB, 0.0f});
+            m_lineVerts.push_back({pNegExt.x(),  pNegExt.y(),  pNegExt.z(),  baseR, baseG, baseB, 0.0f});
+            m_lineVerts.push_back({pNegFade.x(), pNegFade.y(), pNegFade.z(), baseR, baseG, baseB, a});
+            m_lineVerts.push_back({pNegFade.x(), pNegFade.y(), pNegFade.z(), baseR, baseG, baseB, a});
+            m_lineVerts.push_back({pPosFade.x(), pPosFade.y(), pPosFade.z(), baseR, baseG, baseB, a});
+            m_lineVerts.push_back({pPosFade.x(), pPosFade.y(), pPosFade.z(), baseR, baseG, baseB, a});
+            m_lineVerts.push_back({pPosExt.x(),  pPosExt.y(),  pPosExt.z(),  baseR, baseG, baseB, 0.0f});
+
+            QVector3D vNegExt = makePoint(coord, -halfExtent);
+            QVector3D vNegFade = makePoint(coord, -fadeRadius);
+            QVector3D vPosFade = makePoint(coord,  fadeRadius);
+            QVector3D vPosExt = makePoint(coord,  halfExtent);
+
+            m_lineVerts.push_back({vNegExt.x(),  vNegExt.y(),  vNegExt.z(),  baseR, baseG, baseB, 0.0f});
+            m_lineVerts.push_back({vNegFade.x(), vNegFade.y(), vNegFade.z(), baseR, baseG, baseB, a});
+            m_lineVerts.push_back({vNegFade.x(), vNegFade.y(), vNegFade.z(), baseR, baseG, baseB, a});
+            m_lineVerts.push_back({vPosFade.x(), vPosFade.y(), vPosFade.z(), baseR, baseG, baseB, a});
+            m_lineVerts.push_back({vPosFade.x(), vPosFade.y(), vPosFade.z(), baseR, baseG, baseB, a});
+            m_lineVerts.push_back({vPosExt.x(),  vPosExt.y(),  vPosExt.z(),  baseR, baseG, baseB, 0.0f});
         } else {
             addLine(makePoint(-halfExtent, coord), makePoint(halfExtent, coord), baseR, baseG, baseB, a);
             addLine(makePoint(coord, -halfExtent), makePoint(coord, halfExtent), baseR, baseG, baseB, a);

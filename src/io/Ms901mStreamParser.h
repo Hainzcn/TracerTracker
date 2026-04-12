@@ -50,7 +50,8 @@ private:
     int m_accFsr;   // 加速度计满量程（G）
     int m_gyroFsr;  // 陀螺仪满量程（°/s）
 
-    QByteArray m_buffer; // 流式字节缓冲区
+    QByteArray m_buffer;    // 流式字节缓冲区
+    int m_parseOffset = 0;  // 当前解析游标（避免重复 mid）
 
     // 各帧类型的最新解析结果（按 frame_id 索引）
     struct AttitudeData   { double roll, pitch, yaw; };

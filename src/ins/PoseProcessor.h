@@ -23,24 +23,17 @@ public:
     void reset();
 
 signals:
-    // 积分后的位移更新（name 用于 Viewer3D 识别轨迹，如 "Displacement Path"）
     void positionUpdated(const QString& name, double x, double y, double z);
-
-    // 当前速度向量（m/s）
     void velocityUpdated(double vx, double vy, double vz);
 
-    // 已提取的传感器数据（gyr/mag 为空列表表示无该分量）
-    // linear_acc 是世界坐标系下剥离重力后的线加速度
     void parsedDataUpdated(const QString& source, const QString& prefix,
-                            const QList<double>& linearAcc,
-                            const QList<double>& gyr,
-                            const QList<double>& mag);
+                            const Vec3d& linearAcc,
+                            const Vec3d& gyr,
+                            const Vec3d& mag);
 
-    // Madgwick 和 Mahony 滤波四元数（各 4 个 double，[w,x,y,z]）
-    void filterQuaternionsUpdated(const QList<double>& madgwickQ,
-                                   const QList<double>& mahonyQ);
+    void filterQuaternionsUpdated(const Quat4d& madgwickQ,
+                                   const Quat4d& mahonyQ);
 
-    // 节流调试日志消息
     void logMessage(const QString& msg);
 
 public slots:
