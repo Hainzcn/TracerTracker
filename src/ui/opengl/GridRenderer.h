@@ -32,6 +32,9 @@ private:
     QOpenGLBuffer              m_lineVBO;
     QOpenGLVertexArrayObject   m_lineVAO;
 
+    QOpenGLBuffer              m_solidVBO;
+    QOpenGLVertexArrayObject   m_solidVAO;
+
     QOpenGLBuffer              m_triVBO;
     QOpenGLVertexArrayObject   m_triVAO;
 
@@ -39,6 +42,7 @@ private:
 
     struct Vertex { float x, y, z, r, g, b, a; };
     std::vector<Vertex> m_lineVerts;
+    std::vector<Vertex> m_solidVerts;
     std::vector<Vertex> m_triVerts;
 
     double m_lastDistance   = -1.0;
@@ -90,6 +94,9 @@ private:
     void buildGridPlane(int planeIdx, float spacing, float halfExtent,
                         float fadeRadius, int skipMultiple,
                         float baseR, float baseG, float baseB, float baseA);
+
+    void buildGridSolidPlane(int planeIdx, float fadeRadius,
+                             float baseR, float baseG, float baseB, float baseA);
 
     void buildAxisLines();
     void buildAxisQuads();

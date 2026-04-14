@@ -61,6 +61,9 @@ set(SOURCES
     src/ui/SensorInfoOverlay.cpp
     src/ui/ViewOrientationGizmo.cpp
     src/ui/MainWindow.cpp
+    src/ui/SideBar.cpp
+    src/ui/LegacyHotZone.cpp
+    resources/resources.qrc
 )
 
 # 创建可执行文件

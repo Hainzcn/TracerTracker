@@ -40,13 +40,13 @@ protected:
 private:
     // ── 布局常量（与 Python 版完全对应）─────────────────────────
     static constexpr int HISTORY_LEN    = 120;  // 历史采样点数
-    static constexpr int CHART_WIDTH    = 90;   // 图表宽度（与立方体面板对齐）
-    static constexpr int SECTION_HEIGHT = 74;   // 单段高度
-    static constexpr int SECTION_GAP    = 8;    // 段间距
-    static constexpr int HEADER_HEIGHT  = 12;   // 标题高度
-    static constexpr int H_PADDING      = 6;    // 水平内边距
-    static constexpr int V_PADDING      = 6;    // 垂直内边距
-    static constexpr int FRAME_INSET    = 1;    // 图框内缩
+    static constexpr int CHART_WIDTH    = 190;  // 图表宽度（与立方体面板对齐, 90+90+10）
+    static constexpr int SECTION_HEIGHT = 80;   // 单段高度
+    static constexpr int SECTION_GAP    = 12;   // 段间距
+    static constexpr int HEADER_HEIGHT  = 16;   // 标题高度
+    static constexpr int H_PADDING      = 12;   // 水平内边距
+    static constexpr int V_PADDING      = 8;    // 垂直内边距
+    static constexpr int FRAME_INSET    = 0;    // 图框内缩 (移除内缩，让图表更舒展)
     static constexpr int CHART_INSET    = 2;    // 绘图区安全边距
     static constexpr double UPDATE_INTERVAL_SEC = 0.2; // 节流间隔（s）
 

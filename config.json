@@ -43,7 +43,7 @@
     "points": [
         {
             "name": "ACC",
-            "source": "serial",
+            "source": "any",
             "purpose": "accelerometer",
             "x": { "index": 0, "multiplier": 1.0 },
             "y": { "index": 1, "multiplier": 1.0 },
@@ -51,7 +51,7 @@
         },
         {
             "name": "GYR",
-            "source": "serial",
+            "source": "any",
             "purpose": "gyroscope",
             "x": { "index": 3, "multiplier": 1.0 },
             "y": { "index": 4, "multiplier": 1.0 },
@@ -59,7 +59,7 @@
         },
         {
             "name": "QUAT",
-            "source": "serial",
+            "source": "any",
             "purpose": "quaternion",
             "w": { "index": 6, "multiplier": 1.0 },
             "x": { "index": 7, "multiplier": 1.0 },
@@ -68,7 +68,7 @@
         },
         {
             "name": "MAG",
-            "source": "serial",
+            "source": "any",
             "purpose": "magnetic_field",
             "x": { "index": 10, "multiplier": 1.0 },
             "y": { "index": 11, "multiplier": 1.0 },
@@ -76,7 +76,7 @@
         },
         {
             "name": "BARO",
-            "source": "serial",
+            "source": "any",
             "purpose": "barometer",
             "altitude": { "index": 18, "multiplier": 1.0 },
             "pressure": { "index": 17, "multiplier": 1.0 }

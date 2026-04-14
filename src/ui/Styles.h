@@ -254,6 +254,42 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
 )";
 }
 
+// ── 侧边栏样式 ─────────────────────────────────────────────────
+
+inline QString SIDE_BAR_STYLE() {
+    return R"(
+QWidget#sideBar {
+    background-color: #252526;
+    border-right: 1px solid #333333;
+}
+)";
+}
+
+inline QString SIDE_BAR_BTN_STYLE() {
+    return R"(
+QPushButton {
+    background-color: transparent;
+    color: #cccccc;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: 'Microsoft YaHei', sans-serif;
+    padding: 8px 0px;
+}
+QPushButton:hover {
+    background-color: #333333;
+    color: #ffffff;
+}
+QPushButton:pressed {
+    background-color: #1e1e1e;
+}
+QPushButton:checked {
+    background-color: #3f3f46;
+    color: #ffffff;
+}
+)";
+}
+
 // ── 顶栏/底栏样式 ─────────────────────────────────────────────
 
 // 顶部工具栏背景（底边分隔线由 FramelessWindow 顶层的 1px 子控件绘制，避免被子控件盖住）

@@ -74,15 +74,10 @@ std::pair<QPointF, double> CubePaintWidget::project(double px, double py, double
     return { QPointF(cx + x2*scale, cy - y2*scale), z2 };
 }
 
-// 绘制立方体（面深度排序 + 绘制棱）
+    // 绘制立方体（面深度排序 + 绘制棱）
 void CubePaintWidget::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
-
-    // 绘制半透明背景
-    p.setPen(Qt::NoPen);
-    p.setBrush(QColor(50, 50, 50, 100));
-    p.drawRect(rect());
 
     // 计算所有顶点投影位置
     std::array<QPointF, 8> proj2d;
@@ -173,38 +168,43 @@ AttitudeWidget::quaternionToEuler(double w, double x, double y, double z) {
 // 创建一组立方体+标签布局
 AttitudeWidget::CubeGroup AttitudeWidget::createCubeGroup(QLayout* parentLayout,
                                                             const QString& title) {
+    auto* groupLayout = new QVBoxLayout();
+    groupLayout->setContentsMargins(0,0,0,0);
+    groupLayout->setSpacing(4);
+
+    // 标题居中于整个组件
+    auto* titleLbl = new QLabel(title);
+    titleLbl->setAlignment(Qt::AlignCenter);
+    titleLbl->setStyleSheet("QLabel { color: #999999; background: transparent;"
+                             " font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 12px; font-weight: 500; }");
+    groupLayout->addWidget(titleLbl);
+
+    // 立方体和角度标签行
     auto* row = new QHBoxLayout();
     row->setContentsMargins(0,0,0,0);
     row->setSpacing(8);
 
-    // 立方体列（标题 + 立方体）
     auto* cubeCol = new QVBoxLayout();
     cubeCol->setContentsMargins(0,0,0,0);
     cubeCol->setSpacing(0);
-    auto* titleLbl = new QLabel(title);
-    titleLbl->setAlignment(Qt::AlignCenter);
-    titleLbl->setFixedSize(CUBE_SIZE, 16);
-    titleLbl->setStyleSheet("QLabel { color: #999999; background: transparent;"
-                             " font-family: Consolas, monospace; font-size: 12px; }");
     auto* cube = new CubePaintWidget();
     cube->setFixedSize(CUBE_SIZE, CUBE_SIZE);
-    cubeCol->addWidget(titleLbl);
     cubeCol->addWidget(cube);
 
     // 角度标签列
     auto* angleCol = new QVBoxLayout();
     angleCol->setContentsMargins(0,0,0,0);
     angleCol->setSpacing(6);
-    auto* rollLbl  = new QLabel("R:   --");
-    auto* pitchLbl = new QLabel("P:   --");
-    auto* yawLbl   = new QLabel("Y:   --");
+    auto* rollLbl  = new QLabel("<span style='color:#aaaaaa;'>R:</span>   --");
+    auto* pitchLbl = new QLabel("<span style='color:#aaaaaa;'>P:</span>   --");
+    auto* yawLbl   = new QLabel("<span style='color:#aaaaaa;'>Y:</span>   --");
     const QString baseStyle = "background: transparent; padding: 0px; margin: 0px;"
-                              " font-family: Consolas, monospace; font-size: 13px;";
-    rollLbl->setStyleSheet("QLabel { color: #ff6b6b; " + baseStyle + " }");
-    pitchLbl->setStyleSheet("QLabel { color: #69db7c; " + baseStyle + " }");
-    yawLbl->setStyleSheet("QLabel { color: #4dabf7; " + baseStyle + " }");
+                              " font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 13px; font-weight: 500;";
+    rollLbl->setStyleSheet("QLabel { " + baseStyle + " }");
+    pitchLbl->setStyleSheet("QLabel { " + baseStyle + " }");
+    yawLbl->setStyleSheet("QLabel { " + baseStyle + " }");
     for (QLabel* l : {rollLbl, pitchLbl, yawLbl}) l->setFixedWidth(ANGLE_COL_W);
-    angleCol->addSpacing(16);
+    angleCol->addSpacing(8); // 减小顶部间距以对齐立方体中心
     angleCol->addStretch();
     angleCol->addWidget(rollLbl);
     angleCol->addWidget(pitchLbl);
@@ -213,7 +213,9 @@ AttitudeWidget::CubeGroup AttitudeWidget::createCubeGroup(QLayout* parentLayout,
 
     row->addLayout(cubeCol);
     row->addLayout(angleCol);
-    static_cast<QBoxLayout*>(parentLayout)->addLayout(row);
+    
+    groupLayout->addLayout(row);
+    static_cast<QBoxLayout*>(parentLayout)->addLayout(groupLayout);
 
     return {cube, rollLbl, pitchLbl, yawLbl};
 }
@@ -224,23 +226,25 @@ AttitudeWidget::AttitudeWidget(QWidget* parent)
 {
     setAttribute(Qt::WA_TranslucentBackground);
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(4,2,4,2);
-    layout->setSpacing(0);
+    // 增加顶部间距，使 RAW 标题不贴边
+    layout->setContentsMargins(4, 12, 4, 12);
+    layout->setSpacing(12); // 增加组之间的间距
 
     m_raw      = createCubeGroup(layout, "Raw");
     m_madgwick = createCubeGroup(layout, "Madgwick");
     m_mahony   = createCubeGroup(layout, "Mahony");
 
-    int groupH = 16 + CUBE_SIZE;
-    setFixedSize(WIDGET_WIDTH, 2 + 3*groupH + 2);
+    // 计算总高度：16(标题) + 4(间距) + 90(立方体) = 110 每组
+    int groupH = 110;
+    setFixedSize(WIDGET_WIDTH, 12 + 3*groupH + 2*12 + 12);
     setVisible(false);
 }
 
 // 更新一组标签文字（R/P/Y 各带符号和度符号）
 void AttitudeWidget::setEulerLabels(const CubeGroup& g, double roll, double pitch, double yaw) {
-    g.rollLbl->setText(QString("R:%1°").arg(roll,  +6, 'f', 1));
-    g.pitchLbl->setText(QString("P:%1°").arg(pitch, +6, 'f', 1));
-    g.yawLbl->setText(QString("Y:%1°").arg(yaw,   +6, 'f', 1));
+    g.rollLbl->setText(QString("<span style='color:#aaaaaa;'>R:</span> <span style='color:#ff6b6b;'>%1°</span>").arg(roll,  +6, 'f', 1));
+    g.pitchLbl->setText(QString("<span style='color:#aaaaaa;'>P:</span> <span style='color:#69db7c;'>%1°</span>").arg(pitch, +6, 'f', 1));
+    g.yawLbl->setText(QString("<span style='color:#aaaaaa;'>Y:</span> <span style='color:#4dabf7;'>%1°</span>").arg(yaw,   +6, 'f', 1));
 }
 
 // 更新原始四元数
@@ -278,10 +282,23 @@ void AttitudeWidget::updateMahonyQuaternion(double q0, double q1, double q2, dou
 void AttitudeWidget::reset() {
     m_hasData = false;
     for (const CubeGroup* g : {&m_raw, &m_madgwick, &m_mahony}) {
-        g->rollLbl->setText("R:   --");
-        g->pitchLbl->setText("P:   --");
-        g->yawLbl->setText("Y:   --");
+        g->rollLbl->setText("<span style='color:#aaaaaa;'>R:</span>   --");
+        g->pitchLbl->setText("<span style='color:#aaaaaa;'>P:</span>   --");
+        g->yawLbl->setText("<span style='color:#aaaaaa;'>Y:</span>   --");
     }
+}
+
+// 绘制半透明圆角背景容器
+void AttitudeWidget::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+    
+    // 半透明深色背景面板（带有圆角和微弱边框的毛玻璃效果）
+    QRectF bgRect(2, 2, width() - 4, height() - 4);
+    
+    p.setPen(QPen(QColor(255, 255, 255, 30), 1.0)); // 微弱边框
+    p.setBrush(QColor(20, 20, 25, 180)); // 半透明深色背景
+    p.drawRoundedRect(bgRect, 8.0, 8.0); // 8px 圆角
 }
 
 // 鼠标事件穿透（交由下方 3D 视图处理）

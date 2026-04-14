@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "Styles.h"
 #include "ToolBar.h"
+#include "SideBar.h"
 #include "DebugConsole.h"
 #include "AttitudeWidget.h"
 #include "SensorChartPanel.h"
@@ -26,92 +27,6 @@
 // MainWindow.cpp — 主窗口实现
 // ============================================================
 
-// ── AttitudePanelHotZone ──────────────────────────────────────
-
-AttitudePanelHotZone::AttitudePanelHotZone(QWidget* parent)
-    : QWidget(parent)
-{
-    setAttribute(Qt::WA_TranslucentBackground);
-    setMouseTracking(true);
-    setCursor(Qt::PointingHandCursor);
-
-    m_bgAnim = new QVariantAnimation(this);
-    m_bgAnim->setDuration(140);
-    m_bgAnim->setEasingCurve(QEasingCurve::OutCubic);
-    connect(m_bgAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant& v){
-        m_bgAlpha = v.toDouble(); update();
-    });
-
-    m_stripAnim = new QVariantAnimation(this);
-    m_stripAnim->setDuration(160);
-    m_stripAnim->setEasingCurve(QEasingCurve::OutCubic);
-    connect(m_stripAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant& v){
-        m_stripProgress = v.toDouble(); update();
-    });
-}
-
-void AttitudePanelHotZone::animateBg(double target) {
-    m_bgAnim->stop();
-    m_bgAnim->setStartValue(m_bgAlpha);
-    m_bgAnim->setEndValue(target);
-    m_bgAnim->start();
-}
-
-void AttitudePanelHotZone::animateStrip(double target) {
-    m_stripAnim->stop();
-    m_stripAnim->setStartValue(m_stripProgress);
-    m_stripAnim->setEndValue(target);
-    m_stripAnim->start();
-}
-
-void AttitudePanelHotZone::enterEvent(QEnterEvent* ev) {
-    animateBg(128.0);
-    animateStrip(1.0);
-    QWidget::enterEvent(ev);
-}
-
-void AttitudePanelHotZone::leaveEvent(QEvent* ev) {
-    m_pressed = false;
-    animateBg(0.0);
-    animateStrip(0.0);
-    QWidget::leaveEvent(ev);
-}
-
-void AttitudePanelHotZone::mousePressEvent(QMouseEvent* ev) {
-    if (ev->button() == Qt::LeftButton) {
-        m_pressed = true;
-        animateBg(156.0);
-        ev->accept();
-    } else {
-        ev->accept();
-    }
-}
-
-void AttitudePanelHotZone::mouseReleaseEvent(QMouseEvent* ev) {
-    if (ev->button() == Qt::LeftButton) {
-        bool inside = rect().contains(ev->position().toPoint());
-        m_pressed = false;
-        animateBg(inside ? 128.0 : 0.0);
-        if (inside) { emit clicked(); ev->accept(); return; }
-    }
-    ev->accept();
-}
-
-void AttitudePanelHotZone::mouseMoveEvent(QMouseEvent* ev)    { ev->accept(); }
-void AttitudePanelHotZone::wheelEvent(QWheelEvent* ev)        { ev->accept(); }
-void AttitudePanelHotZone::mouseDoubleClickEvent(QMouseEvent* ev){ ev->accept(); }
-
-// 绘制半透明拉条
-void AttitudePanelHotZone::paintEvent(QPaintEvent* ev) {
-    if (m_bgAlpha <= 0.0 || m_stripProgress <= 0.0) { QWidget::paintEvent(ev); return; }
-    QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing);
-    QColor fill(220, 220, 220, int(m_bgAlpha));
-    int visW = std::max(1, std::min(VISIBLE_WIDTH, int(std::round(VISIBLE_WIDTH * m_stripProgress))));
-    p.fillRect(0, 0, visW, height(), fill);
-    QWidget::paintEvent(ev);
-}
-
 // ── MainWindow ────────────────────────────────────────────────
 
 MainWindow::MainWindow(QWidget* parent)
@@ -132,11 +47,36 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_toolbar, &ToolBar::serialStopRequested, this, &MainWindow::clearScene);
     toolBarLayout()->insertWidget(0, m_toolbar);
 
+    // ── 主内容区 (水平布局) ──
+    auto* mainHLayout = new QHBoxLayout();
+    mainHLayout->setContentsMargins(0, 0, 0, 0);
+    mainHLayout->setSpacing(0);
+    layout->addLayout(mainHLayout, 1);
+
+    // ── 左侧栏 ──
+    m_sideBar = new SideBar(this);
+    mainHLayout->addWidget(m_sideBar);
+
+    connect(m_sideBar->infoBtn(), &QPushButton::clicked, this, [this](bool checked) {
+        if (m_attitudePanelExpanded != checked) toggleAttitudePanel();
+        if (m_sensorChartPanelExpanded != checked) toggleSensorChartPanel();
+    });
+
+    connect(m_sideBar->settingsBtn(), &QPushButton::clicked, this, [this]() {
+        onViewerLog("Settings button clicked (Placeholder)");
+    });
+
+    // ── 右侧内容区 (垂直布局) ──
+    auto* rightVLayout = new QVBoxLayout();
+    rightVLayout->setContentsMargins(0, 0, 0, 0);
+    rightVLayout->setSpacing(0);
+    mainHLayout->addLayout(rightVLayout, 1);
+
     // ── 3D 视口 ──
     m_viewer = new Viewer3D(this);
     m_viewer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     connect(m_viewer, &Viewer3D::logMessage, this, &MainWindow::onViewerLog);
-    layout->addWidget(m_viewer, 1);
+    rightVLayout->addWidget(m_viewer, 1);
 
     // ── 浮动子控件（父为 Viewer3D）──
     m_attitudeWidget = new AttitudeWidget(m_viewer);
@@ -161,17 +101,6 @@ MainWindow::MainWindow(QWidget* parent)
         m_projToggleBtn->setText(isOrtho ? "正交" : "透视");
     });
     m_projToggleBtn->show();
-
-    // ── 热区 ──
-    m_attitudeHotzone = new AttitudePanelHotZone(m_viewer);
-    m_attitudeHotzone->setFixedWidth(ATTITUDE_HOTZONE_WIDTH + ATTITUDE_HOTZONE_PADDING);
-    connect(m_attitudeHotzone, &AttitudePanelHotZone::clicked,
-            this, &MainWindow::toggleAttitudePanel);
-
-    m_chartHotzone = new AttitudePanelHotZone(m_viewer);
-    m_chartHotzone->setFixedWidth(ATTITUDE_HOTZONE_WIDTH + ATTITUDE_HOTZONE_PADDING);
-    connect(m_chartHotzone, &AttitudePanelHotZone::clicked,
-            this, &MainWindow::toggleSensorChartPanel);
 
     // ── 面板动画 ──
     m_attitudePanelAnim = new QPropertyAnimation(m_attitudeWidget, "pos", this);
@@ -208,7 +137,7 @@ MainWindow::MainWindow(QWidget* parent)
             m_debugConsole, &DebugConsole::onRawDataReceived);
     connect(m_dataReceiver, &DataReceiver::parsedDataReceived,
             m_debugConsole, &DebugConsole::onParsedDataReceived);
-    layout->addWidget(m_debugConsole);
+    rightVLayout->addWidget(m_debugConsole);
 
     // ── 状态栏 ──
     buildStatusBar();
@@ -313,7 +242,7 @@ QPoint MainWindow::attitudeVisiblePos() const {
 }
 
 QPoint MainWindow::attitudeHiddenPos() const {
-    return QPoint(-m_attitudeWidget->width(), ATTITUDE_PANEL_MARGIN);
+    return QPoint(-m_attitudeWidget->width() + 50, ATTITUDE_PANEL_MARGIN);
 }
 
 QPoint MainWindow::chartVisiblePos() const {
@@ -325,16 +254,11 @@ QPoint MainWindow::chartVisiblePos() const {
 }
 
 QPoint MainWindow::chartHiddenPos() const {
-    return QPoint(-m_sensorChart->width(), chartVisiblePos().y());
+    return QPoint(-m_sensorChart->width() + 50, chartVisiblePos().y());
 }
 
 void MainWindow::syncAttitudeOverlayGeometry() {
     int top = ATTITUDE_PANEL_MARGIN;
-    m_attitudeHotzone->setGeometry(
-        0, top,
-        ATTITUDE_HOTZONE_WIDTH + ATTITUDE_HOTZONE_PADDING,
-        m_attitudeWidget->height()
-    );
 
     if (m_attitudePanelAnim->state() == QAbstractAnimation::Running) {
         QPoint cur = m_attitudeWidget->pos();
@@ -346,16 +270,10 @@ void MainWindow::syncAttitudeOverlayGeometry() {
         m_attitudeWidget->setVisible(m_attitudePanelExpanded);
     }
     if (m_attitudeWidget->isVisible()) m_attitudeWidget->raise();
-    m_attitudeHotzone->raise();
 }
 
 void MainWindow::syncSensorChartGeometry() {
     int top = chartVisiblePos().y();
-    m_chartHotzone->setGeometry(
-        0, top,
-        ATTITUDE_HOTZONE_WIDTH + ATTITUDE_HOTZONE_PADDING,
-        m_sensorChart->height()
-    );
 
     if (m_sensorChartPanelAnim->state() == QAbstractAnimation::Running) {
         QPoint cur = m_sensorChart->pos();
@@ -367,7 +285,6 @@ void MainWindow::syncSensorChartGeometry() {
         m_sensorChart->setVisible(m_sensorChartPanelExpanded);
     }
     if (m_sensorChart->isVisible()) m_sensorChart->raise();
-    m_chartHotzone->raise();
 }
 
 void MainWindow::repositionOverlays() {
@@ -411,11 +328,14 @@ void MainWindow::toggleAttitudePanel() {
     }
 
     m_attitudePanelExpanded = !m_attitudePanelExpanded;
+    if (m_sideBar->infoBtn()->isChecked() != m_attitudePanelExpanded) {
+        m_sideBar->infoBtn()->setChecked(m_attitudePanelExpanded);
+    }
     QPoint target = m_attitudePanelExpanded ? visiblePos : hiddenPos;
+    m_attitudePanelAnim->setEasingCurve(m_attitudePanelExpanded ? QEasingCurve::OutCubic : QEasingCurve::InCubic);
 
     m_attitudeWidget->setVisible(true);
     m_attitudeWidget->raise();
-    m_attitudeHotzone->raise();
     m_attitudePanelAnim->setStartValue(current);
     m_attitudePanelAnim->setEndValue(target);
     m_attitudePanelAnim->start();
@@ -441,11 +361,14 @@ void MainWindow::toggleSensorChartPanel() {
     }
 
     m_sensorChartPanelExpanded = !m_sensorChartPanelExpanded;
+    if (m_sideBar->infoBtn()->isChecked() != m_sensorChartPanelExpanded) {
+        m_sideBar->infoBtn()->setChecked(m_sensorChartPanelExpanded);
+    }
     QPoint target = m_sensorChartPanelExpanded ? visiblePos : hiddenPos;
+    m_sensorChartPanelAnim->setEasingCurve(m_sensorChartPanelExpanded ? QEasingCurve::OutCubic : QEasingCurve::InCubic);
 
     m_sensorChart->setVisible(true);
     m_sensorChart->raise();
-    m_chartHotzone->raise();
     m_sensorChartPanelAnim->setStartValue(current);
     m_sensorChartPanelAnim->setEndValue(target);
     m_sensorChartPanelAnim->start();

@@ -30,7 +30,7 @@ SensorChartPanel::SensorChartPanel(QWidget* parent)
 {
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_TransparentForMouseEvents);
-    int totalH = SECTION_HEIGHT * 3 + SECTION_GAP * 2;
+    int totalH = 8 + SECTION_HEIGHT * 3 + SECTION_GAP * 2 + 8; // 增加上下 padding
     setFixedSize(CHART_WIDTH, totalH);
     setVisible(false);
 }
@@ -111,6 +111,12 @@ void SensorChartPanel::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
 
+    // 半透明深色背景面板（带有圆角和微弱边框的毛玻璃效果）
+    QRectF bgRect(2, 2, width() - 4, height() - 4);
+    p.setPen(QPen(QColor(255, 255, 255, 30), 1.0)); // 微弱边框
+    p.setBrush(QColor(20, 20, 25, 180)); // 半透明深色背景
+    p.drawRoundedRect(bgRect, 8.0, 8.0); // 8px 圆角
+
     // 三段折线图垂直排列
     struct Section {
         QString title;
@@ -131,7 +137,7 @@ void SensorChartPanel::paintEvent(QPaintEvent*) {
          {ALT_COLOR}, false},
     };
 
-    int top = 0;
+    int top = 8; // 增加顶部初始间距
     for (const auto& sec : sections) {
         QRectF rect(0, top, width(), SECTION_HEIGHT);
         drawSection(p, rect, sec.title, sec.history, sec.colors, sec.centered);
@@ -150,31 +156,28 @@ void SensorChartPanel::drawSection(QPainter& p, const QRectF& sectionRect,
     // 图框区域
     QRectF frameRect(
         sectionRect.left() + H_PADDING + FRAME_INSET,
-        titleRect.bottom() + 3,
+        titleRect.bottom() + 6, // 增加标题和图表之间的间距
         sectionRect.width() - 2*H_PADDING - 2*FRAME_INSET,
-        sectionRect.height() - HEADER_HEIGHT - 3 - FRAME_INSET
+        sectionRect.height() - HEADER_HEIGHT - 6 - FRAME_INSET
     );
     // 绘图区域（图框内缩）
     QRectF chartRect = frameRect.adjusted(
         CHART_INSET, V_PADDING + CHART_INSET, -CHART_INSET, -(V_PADDING + CHART_INSET));
 
-    // 绘制图框背景
-    p.setPen(QPen(COLOR_BORDER, 1));
-    p.setBrush(COLOR_BG);
-    p.drawRect(frameRect.adjusted(0.5, 0.5, -0.5, -0.5));
-
     // 绘制标题
     p.save();
-    p.setFont(QFont("Consolas", 10));
+    p.setFont(QFont("Segoe UI", 10, QFont::Medium)); // 使用更现代的字体
     p.setPen(COLOR_TITLE);
     p.drawText(titleRect, Qt::AlignHCenter | Qt::AlignBottom, title);
     p.restore();
 
     // 绘制中心线（零线）
-    QColor lineColor = centered ? COLOR_ZERO_LINE : COLOR_GRID;
-    double midY = chartRect.center().y();
-    p.setPen(QPen(lineColor, 1));
-    p.drawLine(QPointF(chartRect.left(), midY), QPointF(chartRect.right(), midY));
+    if (centered) {
+        QColor lineColor = COLOR_ZERO_LINE;
+        double midY = chartRect.center().y();
+        p.setPen(QPen(lineColor, 1));
+        p.drawLine(QPointF(chartRect.left(), midY), QPointF(chartRect.right(), midY));
+    }
 
     // 收集有效系列的指针（避免拷贝 deque）
     std::vector<const std::deque<double>*> validSeries;
@@ -214,13 +217,46 @@ void SensorChartPanel::drawSection(QPainter& p, const QRectF& sectionRect,
     for (size_t si = 0; si < validSeries.size(); ++si) {
         const auto& data = *validSeries[si];
         QPainterPath path;
+        QPainterPath fillPath;
+        
+        double startX = chartRect.left();
+        double endX = chartRect.left();
+        double baseY = centered ? chartRect.center().y() : chartRect.bottom();
+        
         for (size_t idx = 0; idx < data.size(); ++idx) {
             double x = chartRect.left() + chartRect.width() * idx / std::max(HISTORY_LEN - 1, 1);
             double y = valueToY(data[idx]);
-            if (idx == 0) path.moveTo(x, y);
-            else          path.lineTo(x, y);
+            if (idx == 0) {
+                path.moveTo(x, y);
+                fillPath.moveTo(x, baseY);
+                fillPath.lineTo(x, y);
+                startX = x;
+            } else {
+                path.lineTo(x, y);
+                fillPath.lineTo(x, y);
+            }
+            endX = x;
         }
-        p.setPen(QPen(colors[validColorIdx[si]], 1));
+        
+        if (!data.empty()) {
+            fillPath.lineTo(endX, baseY);
+            fillPath.lineTo(startX, baseY);
+            
+            QColor baseColor = colors[validColorIdx[si]];
+            QLinearGradient grad(0, chartRect.top(), 0, chartRect.bottom());
+            QColor topColor = baseColor;
+            topColor.setAlpha(60);
+            QColor bottomColor = baseColor;
+            bottomColor.setAlpha(5);
+            grad.setColorAt(0.0, topColor);
+            grad.setColorAt(1.0, bottomColor);
+            
+            p.setPen(Qt::NoPen);
+            p.setBrush(grad);
+            p.drawPath(fillPath);
+        }
+        
+        p.setPen(QPen(colors[validColorIdx[si]], 1.5)); // 稍微加粗线条
         p.setBrush(Qt::NoBrush);
         p.drawPath(path);
     }

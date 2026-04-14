@@ -33,6 +33,7 @@ void main() {
 GridRenderer::GridRenderer(QOpenGLFunctions_3_3_Core* gl)
     : m_gl(gl)
     , m_lineVBO(QOpenGLBuffer::VertexBuffer)
+    , m_solidVBO(QOpenGLBuffer::VertexBuffer)
     , m_triVBO(QOpenGLBuffer::VertexBuffer)
 {}
 
@@ -60,7 +61,20 @@ void GridRenderer::initialize() {
     m_lineVAO.release();
     m_lineVBO.release();
 
-    // triangle VAO/VBO (for arrow billboards)
+    // solid plane VAO/VBO
+    m_solidVAO.create();
+    m_solidVAO.bind();
+    m_solidVBO.create();
+    m_solidVBO.bind();
+    m_solidVBO.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+    m_gl->glEnableVertexAttribArray(0);
+    m_gl->glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(0));
+    m_gl->glEnableVertexAttribArray(1);
+    m_gl->glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(3 * sizeof(float)));
+    m_solidVAO.release();
+    m_solidVBO.release();
+
+    // triangle VAO/VBO (for arrow billboards and axis quads)
     m_triVAO.create();
     m_triVAO.bind();
     m_triVBO.create();
@@ -217,13 +231,10 @@ GridRenderer::RGBA GridRenderer::applySubmersion(RGBA color, float depthFactor) 
     depthFactor = std::max(0.0f, std::min(1.0f, depthFactor));
     if (depthFactor <= 1e-6f) return color;
 
-    float gray = color.r * 0.299f + color.g * 0.587f + color.b * 0.114f;
-    float desat = depthFactor * SUBMERSION_DESAT_MAX;
-    float dim = 1.0f - depthFactor * SUBMERSION_DIM_MAX;
-    float sr = std::max(0.0f, std::min(1.0f, (color.r * (1.0f - desat) + gray * desat) * dim));
-    float sg = std::max(0.0f, std::min(1.0f, (color.g * (1.0f - desat) + gray * desat) * dim));
-    float sb = std::max(0.0f, std::min(1.0f, (color.b * (1.0f - desat) + gray * desat) * dim));
-    return {sr, sg, sb, color.a};
+    // 随深度降低不透明度（Alpha），最大衰减 100%（完全透明）
+    // 使用非线性衰减曲线，使得下降更加平滑
+    float alphaMult = 1.0f - depthFactor * depthFactor;
+    return {color.r, color.g, color.b, color.a * alphaMult};
 }
 
 QColor GridRenderer::applyVisibilityToColor(const QColor& base, float visibility,
@@ -232,7 +243,7 @@ QColor GridRenderer::applyVisibilityToColor(const QColor& base, float visibility
     RGBA rgba{float(base.redF()), float(base.greenF()), float(base.blueF()), float(base.alphaF())};
     RGBA styled = applySubmersion(rgba, depthFactor);
     return QColor::fromRgbF(styled.r, styled.g, styled.b,
-                            std::max(0.0f, std::min(1.0f, float(base.alphaF()) * visibility)));
+                            std::max(0.0f, std::min(1.0f, styled.a * visibility)));
 }
 
 QString GridRenderer::formatTickValue(float v) {
@@ -257,7 +268,7 @@ void GridRenderer::buildGridPlane(int planeIdx, float spacing, float halfExtent,
 
     int n = int(halfExtent / spacing + 0.5f);
     bool doFade = fadeRadius < halfExtent;
-    float invFadeRange = doFade ? (1.0f / std::max(halfExtent - fadeRadius, 1e-9f)) : 1.0f;
+    float invFadeRange = doFade ? (1.0f / std::max(fadeRadius, 1e-9f)) : 1.0f;
 
     // axis_u and axis_v for the plane
     int axU, axV;
@@ -275,44 +286,145 @@ void GridRenderer::buildGridPlane(int planeIdx, float spacing, float halfExtent,
     for (int i = -n; i <= n; ++i) {
         if (skipMultiple > 0 && i % skipMultiple == 0) continue;
         float coord = float(i) * spacing;
-        float d = std::abs(coord);
+        
+        if (doFade && std::abs(coord) > fadeRadius) continue;
 
-        float alphaMult = 1.0f;
-        if (doFade && d > fadeRadius) {
-            float t = (d - fadeRadius) * invFadeRange;
-            alphaMult = std::max(0.0f, 1.0f - t * t);
-            if (alphaMult < 1e-4f) continue;
+        // The line intersects the fade circle at v = +/- sqrt(fadeRadius^2 - coord^2).
+        float vFade = doFade ? std::sqrt(std::max(0.0f, fadeRadius * fadeRadius - coord * coord)) : halfExtent;
+        
+        float centerAlphaMult = 1.0f;
+        if (doFade) {
+            float dCenter = std::abs(coord);
+            float t = dCenter * invFadeRange; // Simplified fade curve
+            centerAlphaMult = std::max(0.0f, 1.0f - t * t);
         }
-
-        float a = baseA * alphaMult;
+        float aCenter = baseA * centerAlphaMult;
 
         if (doFade) {
             QVector3D pNegExt = makePoint(-halfExtent, coord);
-            QVector3D pNegFade = makePoint(-fadeRadius, coord);
-            QVector3D pPosFade = makePoint( fadeRadius, coord);
-            QVector3D pPosExt = makePoint( halfExtent, coord);
+            QVector3D pNegFade = makePoint(-vFade, coord);
+            QVector3D pCenter = makePoint(0.0f, coord);
+            QVector3D pPosFade = makePoint(vFade, coord);
+            QVector3D pPosExt = makePoint(halfExtent, coord);
 
+            // U-axis lines (v is constant = coord, u varies)
             m_lineVerts.push_back({pNegExt.x(),  pNegExt.y(),  pNegExt.z(),  baseR, baseG, baseB, 0.0f});
-            m_lineVerts.push_back({pNegFade.x(), pNegFade.y(), pNegFade.z(), baseR, baseG, baseB, a});
-            m_lineVerts.push_back({pNegFade.x(), pNegFade.y(), pNegFade.z(), baseR, baseG, baseB, a});
-            m_lineVerts.push_back({pPosFade.x(), pPosFade.y(), pPosFade.z(), baseR, baseG, baseB, a});
-            m_lineVerts.push_back({pPosFade.x(), pPosFade.y(), pPosFade.z(), baseR, baseG, baseB, a});
+            m_lineVerts.push_back({pNegFade.x(), pNegFade.y(), pNegFade.z(), baseR, baseG, baseB, 0.0f});
+            
+            m_lineVerts.push_back({pNegFade.x(), pNegFade.y(), pNegFade.z(), baseR, baseG, baseB, 0.0f});
+            m_lineVerts.push_back({pCenter.x(),  pCenter.y(),  pCenter.z(),  baseR, baseG, baseB, aCenter});
+            
+            m_lineVerts.push_back({pCenter.x(),  pCenter.y(),  pCenter.z(),  baseR, baseG, baseB, aCenter});
+            m_lineVerts.push_back({pPosFade.x(), pPosFade.y(), pPosFade.z(), baseR, baseG, baseB, 0.0f});
+            
+            m_lineVerts.push_back({pPosFade.x(), pPosFade.y(), pPosFade.z(), baseR, baseG, baseB, 0.0f});
             m_lineVerts.push_back({pPosExt.x(),  pPosExt.y(),  pPosExt.z(),  baseR, baseG, baseB, 0.0f});
 
+            // V-axis lines (u is constant = coord, v varies)
             QVector3D vNegExt = makePoint(coord, -halfExtent);
-            QVector3D vNegFade = makePoint(coord, -fadeRadius);
-            QVector3D vPosFade = makePoint(coord,  fadeRadius);
-            QVector3D vPosExt = makePoint(coord,  halfExtent);
+            QVector3D vNegFade = makePoint(coord, -vFade);
+            QVector3D vCenter = makePoint(coord, 0.0f);
+            QVector3D vPosFade = makePoint(coord, vFade);
+            QVector3D vPosExt = makePoint(coord, halfExtent);
 
             m_lineVerts.push_back({vNegExt.x(),  vNegExt.y(),  vNegExt.z(),  baseR, baseG, baseB, 0.0f});
-            m_lineVerts.push_back({vNegFade.x(), vNegFade.y(), vNegFade.z(), baseR, baseG, baseB, a});
-            m_lineVerts.push_back({vNegFade.x(), vNegFade.y(), vNegFade.z(), baseR, baseG, baseB, a});
-            m_lineVerts.push_back({vPosFade.x(), vPosFade.y(), vPosFade.z(), baseR, baseG, baseB, a});
-            m_lineVerts.push_back({vPosFade.x(), vPosFade.y(), vPosFade.z(), baseR, baseG, baseB, a});
+            m_lineVerts.push_back({vNegFade.x(), vNegFade.y(), vNegFade.z(), baseR, baseG, baseB, 0.0f});
+            
+            m_lineVerts.push_back({vNegFade.x(), vNegFade.y(), vNegFade.z(), baseR, baseG, baseB, 0.0f});
+            m_lineVerts.push_back({vCenter.x(),  vCenter.y(),  vCenter.z(),  baseR, baseG, baseB, aCenter});
+            
+            m_lineVerts.push_back({vCenter.x(),  vCenter.y(),  vCenter.z(),  baseR, baseG, baseB, aCenter});
+            m_lineVerts.push_back({vPosFade.x(), vPosFade.y(), vPosFade.z(), baseR, baseG, baseB, 0.0f});
+            
+            m_lineVerts.push_back({vPosFade.x(), vPosFade.y(), vPosFade.z(), baseR, baseG, baseB, 0.0f});
             m_lineVerts.push_back({vPosExt.x(),  vPosExt.y(),  vPosExt.z(),  baseR, baseG, baseB, 0.0f});
         } else {
-            addLine(makePoint(-halfExtent, coord), makePoint(halfExtent, coord), baseR, baseG, baseB, a);
-            addLine(makePoint(coord, -halfExtent), makePoint(coord, halfExtent), baseR, baseG, baseB, a);
+            addLine(makePoint(-halfExtent, coord), makePoint(halfExtent, coord), baseR, baseG, baseB, baseA);
+            addLine(makePoint(coord, -halfExtent), makePoint(coord, halfExtent), baseR, baseG, baseB, baseA);
+        }
+    }
+}
+
+// ── grid solid plane (base color + lighting fade) ─────────────────
+
+void GridRenderer::buildGridSolidPlane(int planeIdx, float fadeRadius,
+                                       float baseR, float baseG, float baseB, float baseA) {
+    if (fadeRadius <= 0.0f || baseA < 1e-5f) return;
+
+    int axU, axV;
+    if (planeIdx == 0)      { axU = 0; axV = 1; } // XOY
+    else if (planeIdx == 1) { axU = 0; axV = 2; } // XOZ
+    else                    { axU = 1; axV = 2; } // YOZ
+
+    auto makePoint = [&](float u, float v) -> QVector3D {
+        QVector3D p(0, 0, 0);
+        float offset = -0.01f; // slight offset to prevent Z-fighting with grid lines
+        if (axU == 0) p.setX(u); else if (axU == 1) p.setY(u); else p.setZ(u);
+        if (axV == 0) p.setX(v); else if (axV == 1) p.setY(v); else p.setZ(v);
+        
+        if (planeIdx == 0) p.setZ(offset);      // XOY
+        else if (planeIdx == 1) p.setY(offset); // XOZ
+        else p.setX(offset);                    // YOZ
+        return p;
+    };
+
+    int segments = 64;
+    int rings = 4; // Use multiple rings to create a smooth, non-linear fade and reduce banding
+
+    std::vector<std::vector<QVector3D>> ringPoints(rings + 1);
+    std::vector<float> ringAlphas(rings + 1);
+    std::vector<float> ringColors(rings + 1);
+
+    for (int r = 0; r <= rings; ++r) {
+        float t = float(r) / float(rings);
+        float radius = fadeRadius * t;
+        
+        // Non-linear fade curve (smoothstep-like) for alpha and color
+        float fade = 1.0f - t * t; // Quadratic falloff looks more natural for light
+        
+        ringAlphas[r] = baseA * fade;
+        ringColors[r] = 0.5f + 1.0f * fade; // Color intensity multiplier
+
+        for (int i = 0; i < segments; ++i) {
+            float angle = (float(i) / float(segments)) * 2.0f * 3.1415926535f;
+            float u = radius * std::cos(angle);
+            float v = radius * std::sin(angle);
+            ringPoints[r].push_back(makePoint(u, v));
+        }
+    }
+
+    // Build concentric triangle strips
+    for (int r = 0; r < rings; ++r) {
+        float a1 = ringAlphas[r];
+        float a2 = ringAlphas[r + 1];
+        float c1 = ringColors[r];
+        float c2 = ringColors[r + 1];
+
+        float r1 = std::min(1.0f, baseR * c1);
+        float g1 = std::min(1.0f, baseG * c1);
+        float b1 = std::min(1.0f, baseB * c1);
+
+        float r2 = std::min(1.0f, baseR * c2);
+        float g2 = std::min(1.0f, baseG * c2);
+        float b2 = std::min(1.0f, baseB * c2);
+
+        for (int i = 0; i < segments; ++i) {
+            int next_i = (i + 1) % segments;
+            
+            QVector3D p1 = ringPoints[r][i];
+            QVector3D p2 = ringPoints[r][next_i];
+            QVector3D p3 = ringPoints[r + 1][i];
+            QVector3D p4 = ringPoints[r + 1][next_i];
+
+            // Triangle 1: p1, p2, p3
+            m_solidVerts.push_back({p1.x(), p1.y(), p1.z(), r1, g1, b1, a1});
+            m_solidVerts.push_back({p2.x(), p2.y(), p2.z(), r1, g1, b1, a1});
+            m_solidVerts.push_back({p3.x(), p3.y(), p3.z(), r2, g2, b2, a2});
+
+            // Triangle 2: p2, p4, p3
+            m_solidVerts.push_back({p2.x(), p2.y(), p2.z(), r1, g1, b1, a1});
+            m_solidVerts.push_back({p4.x(), p4.y(), p4.z(), r2, g2, b2, a2});
+            m_solidVerts.push_back({p3.x(), p3.y(), p3.z(), r2, g2, b2, a2});
         }
     }
 }
@@ -507,6 +619,7 @@ void GridRenderer::rebuildGeometry(double distance, double sceneScale,
                                    double elevation, double azimuth,
                                    float orthoBlend) {
     m_lineVerts.clear();
+    m_solidVerts.clear();
     m_triVerts.clear();
 
     m_axisLength = float(distance) * AXIS_VISUAL_RATIO / std::max(float(sceneScale), 1e-9f);
@@ -525,9 +638,9 @@ void GridRenderer::rebuildGeometry(double distance, double sceneScale,
     m_axisLabelVis = computeAxisLabelVisibility(m_camDir);
 
     // grid extent
-    float halfExtentRaw = std::max(m_posExt * 4.0f, 1e-3f);
+    float halfExtentRaw = std::max(m_posExt * 10.0f, 1e-3f); // 扩大网络范围
     m_gridHalfExtent = std::ceil(halfExtentRaw / std::max(m_majorSpacing, 1e-15f)) * m_majorSpacing;
-    m_gridFadeRadius = m_posExt * 1.2f;
+    m_gridFadeRadius = m_posExt * 2.5f; // 增大衰减半径
 
     // minor line fade based on phase
     float fade = std::max(0.0f, std::min(1.0f, 1.0f - m_phaseT));
@@ -537,6 +650,11 @@ void GridRenderer::rebuildGeometry(double distance, double sceneScale,
     float planeW[3] = {m_planeWeights.xoy, m_planeWeights.xoz, m_planeWeights.yoz};
     for (int pi = 0; pi < 3; ++pi) {
         if (planeW[pi] <= 1e-4f) continue;
+
+        // Draw solid base plane with lighting and fade
+        float solidAlpha = 0.08f * planeW[pi]; // high transparency light gray base
+        // 模拟光照范围不变，所以这里传入一个固定的相对较小的半径 (例如 m_posExt * 1.8f)
+        buildGridSolidPlane(pi, m_posExt * 1.5f, 0.7f, 0.7f, 0.7f, solidAlpha);
 
         float majorAlpha = (float(GRID_MAJOR_ALPHA_I) / 255.0f) * planeW[pi];
         buildGridPlane(pi, m_majorSpacing, m_gridHalfExtent, m_gridFadeRadius,
@@ -586,6 +704,10 @@ void GridRenderer::update(double distance, double sceneScale,
     m_lineVBO.allocate(m_lineVerts.data(), int(m_lineVerts.size() * sizeof(Vertex)));
     m_lineVBO.release();
 
+    m_solidVBO.bind();
+    m_solidVBO.allocate(m_solidVerts.data(), int(m_solidVerts.size() * sizeof(Vertex)));
+    m_solidVBO.release();
+
     m_triVBO.bind();
     m_triVBO.allocate(m_triVerts.data(), int(m_triVerts.size() * sizeof(Vertex)));
     m_triVBO.release();
@@ -610,7 +732,16 @@ void GridRenderer::render(const QMatrix4x4& mvpMatrix) {
         m_lineVAO.release();
     }
 
-    // draw triangles (arrow billboards)
+    // draw solid plane with depth write disabled so it doesn't cull axes/track
+    if (!m_solidVerts.empty()) {
+        m_gl->glDepthMask(GL_FALSE);
+        m_solidVAO.bind();
+        m_gl->glDrawArrays(GL_TRIANGLES, 0, GLsizei(m_solidVerts.size()));
+        m_solidVAO.release();
+        m_gl->glDepthMask(GL_TRUE);
+    }
+
+    // draw triangles (axis quads + arrow billboards)
     if (!m_triVerts.empty()) {
         m_triVAO.bind();
         m_gl->glDrawArrays(GL_TRIANGLES, 0, GLsizei(m_triVerts.size()));

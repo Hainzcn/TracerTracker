@@ -80,6 +80,8 @@ public slots:
     void reset();
 
 protected:
+    void paintEvent(QPaintEvent* ev) override;
+
     // 让鼠标事件穿透到下方 3D 视图
     void mousePressEvent(QMouseEvent* ev)  override;
     void mouseReleaseEvent(QMouseEvent* ev)override;
@@ -88,7 +90,7 @@ protected:
 
 private:
     static constexpr int CUBE_SIZE    = 90;
-    static constexpr int ANGLE_COL_W  = 80;
+    static constexpr int ANGLE_COL_W  = 90; // 适当增加宽度，防止文字溢出
     static constexpr int WIDGET_WIDTH = ANGLE_COL_W + CUBE_SIZE + 10;
 
     // 一组立方体和其对应的欧拉角标签
