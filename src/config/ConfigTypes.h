@@ -75,6 +75,27 @@ struct AxisMapping {
     double multiplier = 1.0; // 换算乘数
 };
 
+// 合法的 purpose 值集合
+namespace PointPurpose {
+    inline constexpr const char* Accelerometer = "accelerometer";
+    inline constexpr const char* Gyroscope     = "gyroscope";
+    inline constexpr const char* Quaternion     = "quaternion";
+    inline constexpr const char* MagneticField  = "magnetic_field";
+    inline constexpr const char* Barometer      = "barometer";
+    // purpose 为空字符串表示纯可视化点
+
+    inline bool isValid(const QString& p) {
+        return p.isEmpty()
+            || p == Accelerometer || p == Gyroscope
+            || p == Quaternion    || p == MagneticField
+            || p == Barometer;
+    }
+
+    inline bool isSensor(const QString& p) {
+        return !p.isEmpty() && isValid(p);
+    }
+}
+
 // 单个数据点（point）配置条目
 struct PointConfig {
     QString                  name;            // 点名称（唯一标识）
@@ -87,4 +108,26 @@ struct PointConfig {
     AxisMapping              pressure;        // 气压计气压映射（仅 purpose=barometer 时使用）
     QColor                   color = QColor(255, 0, 0, 255); // 点颜色
     int                      size  = 10;      // 点大小（像素）
+
+    // 判断此 point 是否匹配给定的数据来源与前缀
+    bool matchesSource(const QString& src, const QString& pfx) const {
+        if (source != "any" && source != src) return false;
+        QString cfgPrefix = prefix.value_or(QString());
+        return cfgPrefix == pfx;
+    }
+
+    // 提取 XYZ 轴所需的最大 data 索引 +1（即 data.size() 下界）
+    int requiredSizeXYZ() const {
+        return std::max({x.index, y.index, z.index}) + 1;
+    }
+
+    // 提取四元数 WXYZ 所需的最小 data 长度
+    int requiredSizeQuat() const {
+        return std::max({w.index, x.index, y.index, z.index}) + 1;
+    }
+
+    // 提取气压计所需的最小 data 长度
+    int requiredSizeBaro() const {
+        return std::max(altitude.index, pressure.index) + 1;
+    }
 };

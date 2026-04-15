@@ -35,6 +35,15 @@ public:
     // 获取全部数据点配置列表（缓存，仅 reload 时重新解析）
     const QList<PointConfig>& getPoints() const;
 
+    // 按 purpose + source/prefix 查找第一个匹配的传感器点
+    // 返回 nullptr 表示未找到
+    const PointConfig* findSensorPoint(const QString& purpose,
+                                       const QString& source,
+                                       const QString& prefix) const;
+
+    // 判断是否存在指定 purpose 的传感器点（不考虑 source/prefix）
+    bool hasSensorPurpose(const QString& purpose) const;
+
     // 获取重力参考值（m/s²）
     double gravityReference() const;
 
@@ -74,4 +83,5 @@ private:
     // 缓存的点配置列表（在 reload 时刷新）
     QList<PointConfig> m_cachedPoints;
     void rebuildPointsCache();
+    void validatePointsCache();
 };

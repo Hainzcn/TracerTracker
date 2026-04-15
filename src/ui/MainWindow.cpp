@@ -151,11 +151,8 @@ MainWindow::MainWindow(QWidget* parent)
     // ── 全局样式 ──
     setStyleSheet(Styles::MAIN_WINDOW_STYLE());
 
-    // ── 是否有四元数类型的点配置 ──
-    auto& cfg = ConfigLoader::instance();
-    auto points = cfg.getPoints();
-    m_hasQuaternionPoint = std::any_of(points.begin(), points.end(),
-        [](const PointConfig& p){ return p.purpose == "quaternion"; });
+    // ── 缓存传感器 purpose 存在性 ──
+    m_hasQuaternionSensor = ConfigLoader::instance().hasSensorPurpose(PointPurpose::Quaternion);
 
     // ── 状态超时定时器（1s 周期）──
     m_statusTimer = new QTimer(this);
@@ -386,11 +383,10 @@ void MainWindow::onDataReceived(const QString& source, const QString& prefix,
 {
     qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
 
-    // 转发给 INS 管线处理
     m_poseProcessor->process(source, prefix, data);
 
-    updateOverlays(data);
-    updateSensorCharts(data);
+    updateOverlays(source, prefix, data);
+    updateSensorCharts(source, prefix, data);
 
     QString statusText = QString("接收中 (%1 个值)").arg(data.size());
     if (!prefix.isEmpty()) statusText += QString(" [%1]").arg(prefix);
@@ -405,30 +401,17 @@ void MainWindow::onDataReceived(const QString& source, const QString& prefix,
         m_serialStatusLabel->setStyleSheet(Styles::STATUS_LABEL_ACTIVE_STYLE());
     }
 
-    // 直接更新 Viewer3D 中配置的点
-    {
-    auto& cfg2 = ConfigLoader::instance();
-    auto pointCfgs = cfg2.getPoints();
-    for (const auto& pc : pointCfgs) {
-        if (!pc.purpose.isEmpty() && pc.purpose != "position") continue;
+    // 更新 Viewer3D 中配置的可视化点（purpose 为空或 "position"）
+    for (const auto& pc : ConfigLoader::instance().getPoints()) {
+        if (!pc.purpose.isEmpty()) continue;
+        if (!pc.matchesSource(source, prefix)) continue;
+        if (data.size() < pc.requiredSizeXYZ()) continue;
 
-        if (pc.source != "any" && pc.source != source) continue;
-
-        QString cfgPrefix = pc.prefix.value_or(QString());
-        if (cfgPrefix != prefix) continue;
-
-        int xi = pc.x.index;
-        int yi = pc.y.index;
-        int zi = pc.z.index;
-        int need = std::max(std::max(xi, yi), zi) + 1;
-        if (data.size() < need) continue;
-
-        double x = data[xi] * pc.x.multiplier;
-        double y = data[yi] * pc.y.multiplier;
-        double z = data[zi] * pc.z.multiplier;
+        double x = data[pc.x.index] * pc.x.multiplier;
+        double y = data[pc.y.index] * pc.y.multiplier;
+        double z = data[pc.z.index] * pc.z.multiplier;
         m_viewer->updatePoint(pc.name, x, y, z, pc.color, pc.size);
     }
-    } // end cfg2 scope
 
     m_viewer->update();
 }
@@ -464,34 +447,69 @@ void MainWindow::onFilterQuaternionsUpdated(const Quat4d& madgwickQ,
 void MainWindow::onPoseLog(const QString& msg)   { m_debugConsole->onPoseLog(msg); }
 void MainWindow::onViewerLog(const QString& msg) { m_debugConsole->onPoseLog(msg); }
 
-// 更新 AttitudeWidget 和 SensorInfoOverlay 的姿态/海拔数据
-void MainWindow::updateOverlays(const QList<double>& data) {
-    if (data.size() < 19) return;
-    if (m_hasQuaternionPoint)
-        m_attitudeWidget->updateQuaternion(data[6], data[7], data[8], data[9]);
-    else
-        m_attitudeWidget->updateEuler(data[14], data[15], data[16]);
-    m_sensorOverlay->updateAltitude(data[17], data[18]);
+// 通过 points 配置提取姿态/海拔数据，更新 AttitudeWidget 和 SensorInfoOverlay
+void MainWindow::updateOverlays(const QString& source, const QString& prefix,
+                                 const QList<double>& data)
+{
+    auto& cfg = ConfigLoader::instance();
+
+    // 姿态显示：优先使用四元数配置
+    if (m_hasQuaternionSensor) {
+        const auto* qp = cfg.findSensorPoint(PointPurpose::Quaternion, source, prefix);
+        if (qp && data.size() >= qp->requiredSizeQuat()) {
+            double w = data[qp->w.index] * qp->w.multiplier;
+            double x = data[qp->x.index] * qp->x.multiplier;
+            double y = data[qp->y.index] * qp->y.multiplier;
+            double z = data[qp->z.index] * qp->z.multiplier;
+            m_attitudeWidget->updateQuaternion(w, x, y, z);
+        }
+    }
+
+    // 气压/海拔
+    const auto* bp = cfg.findSensorPoint(PointPurpose::Barometer, source, prefix);
+    if (bp && data.size() >= bp->requiredSizeBaro()) {
+        double pres = data[bp->pressure.index] * bp->pressure.multiplier;
+        double alt  = data[bp->altitude.index] * bp->altitude.multiplier;
+        m_sensorOverlay->updateAltitude(pres, alt);
+    }
 }
 
-// 更新 SensorChartPanel 的各轴历史数据
-void MainWindow::updateSensorCharts(const QList<double>& data) {
+// 通过 points 配置提取传感器数据，更新 SensorChartPanel
+void MainWindow::updateSensorCharts(const QString& source, const QString& prefix,
+                                     const QList<double>& data)
+{
+    auto& cfg = ConfigLoader::instance();
     std::optional<std::tuple<double,double,double>> acc, euler;
     std::optional<double> pressure, altitude;
 
-    if (data.size() >= 3)
-        acc = {data[0], data[1], data[2]};
-
-    if (m_hasQuaternionPoint && data.size() >= 10) {
-        auto [r,p,y] = AttitudeWidget::quaternionToEuler(data[6], data[7], data[8], data[9]);
-        euler = {r, p, y};
-    } else if (data.size() >= 17) {
-        euler = {data[14], data[15], data[16]};
+    // 加速度
+    const auto* ap = cfg.findSensorPoint(PointPurpose::Accelerometer, source, prefix);
+    if (ap && data.size() >= ap->requiredSizeXYZ()) {
+        acc = std::make_tuple(
+            data[ap->x.index] * ap->x.multiplier,
+            data[ap->y.index] * ap->y.multiplier,
+            data[ap->z.index] * ap->z.multiplier
+        );
     }
 
-    if (data.size() >= 19) {
-        pressure = data[17];
-        altitude = data[18];
+    // 姿态角：优先从四元数转换，否则无数据
+    if (m_hasQuaternionSensor) {
+        const auto* qp = cfg.findSensorPoint(PointPurpose::Quaternion, source, prefix);
+        if (qp && data.size() >= qp->requiredSizeQuat()) {
+            double w = data[qp->w.index] * qp->w.multiplier;
+            double x = data[qp->x.index] * qp->x.multiplier;
+            double y = data[qp->y.index] * qp->y.multiplier;
+            double z = data[qp->z.index] * qp->z.multiplier;
+            auto [r, p, yaw] = AttitudeWidget::quaternionToEuler(w, x, y, z);
+            euler = std::make_tuple(r, p, yaw);
+        }
+    }
+
+    // 气压/海拔
+    const auto* bp = cfg.findSensorPoint(PointPurpose::Barometer, source, prefix);
+    if (bp && data.size() >= bp->requiredSizeBaro()) {
+        pressure = data[bp->pressure.index] * bp->pressure.multiplier;
+        altitude = data[bp->altitude.index] * bp->altitude.multiplier;
     }
 
     m_sensorChart->pushSnapshot(acc, euler, pressure, altitude);

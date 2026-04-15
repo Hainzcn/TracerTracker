@@ -6,6 +6,7 @@
 #include <QJsonValue>
 #include <QDebug>
 #include <QDir>
+#include <QSet>
 
 // ============================================================
 // ConfigLoader.cpp — 配置加载器实现
@@ -359,9 +360,98 @@ void ConfigLoader::rebuildPointsCache() {
             m_cachedPoints.append(parsePointConfig(v.toObject()));
         }
     }
+    validatePointsCache();
+}
+
+void ConfigLoader::validatePointsCache() {
+    QSet<QString> seenNames;
+    // key = "source|prefix|purpose", 检测同一数据源下的 purpose 冲突
+    QSet<QString> seenSensorBindings;
+
+    for (int i = 0; i < m_cachedPoints.size(); ++i) {
+        const PointConfig& p = m_cachedPoints[i];
+        QString ctx = QString("points[%1] name='%2'").arg(i).arg(p.name);
+
+        // 1. name 唯一性
+        if (p.name.isEmpty()) {
+            qWarning() << "ConfigLoader:" << ctx << "name 为空";
+        } else if (seenNames.contains(p.name)) {
+            qWarning() << "ConfigLoader:" << ctx << "name 重复";
+        } else {
+            seenNames.insert(p.name);
+        }
+
+        // 2. purpose 白名单
+        if (!PointPurpose::isValid(p.purpose)) {
+            qWarning() << "ConfigLoader:" << ctx
+                       << "purpose '" + p.purpose + "' 不在合法值列表中"
+                          " (accelerometer/gyroscope/quaternion/magnetic_field/barometer/空)";
+        }
+
+        // 3. index 合法性（>= 0）
+        auto checkIndex = [&](const QString& axis, int idx) {
+            if (idx < 0)
+                qWarning() << "ConfigLoader:" << ctx
+                           << axis << "index =" << idx << "不合法（需 >= 0）";
+        };
+        checkIndex("x", p.x.index);
+        checkIndex("y", p.y.index);
+        checkIndex("z", p.z.index);
+        if (p.purpose == PointPurpose::Quaternion)
+            checkIndex("w", p.w.index);
+        if (p.purpose == PointPurpose::Barometer) {
+            checkIndex("altitude", p.altitude.index);
+            checkIndex("pressure", p.pressure.index);
+        }
+
+        // 4. 同一 (source, prefix) 下 sensor purpose 唯一性
+        if (PointPurpose::isSensor(p.purpose)) {
+            QString bindingKey = p.source + "|"
+                               + p.prefix.value_or(QString()) + "|"
+                               + p.purpose;
+            if (seenSensorBindings.contains(bindingKey)) {
+                qWarning() << "ConfigLoader:" << ctx
+                           << "source='" + p.source + "' prefix='"
+                              + p.prefix.value_or(QString()) + "' 下存在重复的"
+                           << p.purpose << "映射";
+            } else {
+                seenSensorBindings.insert(bindingKey);
+            }
+        }
+    }
+
+    // 5. 必需 purpose 存在性检查
+    bool hasAcc = false, hasGyro = false;
+    for (const PointConfig& p : m_cachedPoints) {
+        if (p.purpose == PointPurpose::Accelerometer) hasAcc = true;
+        if (p.purpose == PointPurpose::Gyroscope)     hasGyro = true;
+    }
+    if (!hasAcc)
+        qWarning() << "ConfigLoader: points 中缺少 purpose='accelerometer' 的传感器配置，INS 管线将无法工作";
+    if (!hasGyro)
+        qWarning() << "ConfigLoader: points 中缺少 purpose='gyroscope' 的传感器配置，AHRS 和 ZUPT 将无法工作";
 }
 
 // 获取所有数据点配置（返回缓存引用）
 const QList<PointConfig>& ConfigLoader::getPoints() const {
     return m_cachedPoints;
+}
+
+// 按 purpose + source/prefix 查找第一个匹配的传感器点
+const PointConfig* ConfigLoader::findSensorPoint(const QString& purpose,
+                                                  const QString& source,
+                                                  const QString& prefix) const {
+    for (const PointConfig& p : m_cachedPoints) {
+        if (p.purpose == purpose && p.matchesSource(source, prefix))
+            return &p;
+    }
+    return nullptr;
+}
+
+// 判断是否存在指定 purpose 的传感器点
+bool ConfigLoader::hasSensorPurpose(const QString& purpose) const {
+    for (const PointConfig& p : m_cachedPoints) {
+        if (p.purpose == purpose) return true;
+    }
+    return false;
 }

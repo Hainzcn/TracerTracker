@@ -105,20 +105,15 @@ void PoseProcessor::process(const QString& source, const QString& prefix,
 
     int matchedPoints = 0;
     for (const PointConfig& p : pointsCfg) {
-        // 过滤数据来源（any 匹配所有来源）
-        if (p.source != "any" && p.source != source) continue;
-
-        // 过滤前缀（nullopt 或空字符串表示匹配无前缀数据）
-        QString cfgPrefix = p.prefix.value_or(QString());
-        if (cfgPrefix != prefix) continue;
+        if (!p.matchesSource(source, prefix)) continue;
 
         ++matchedPoints;
 
-        if (p.purpose == "accelerometer")  accVec  = extractVector(p, data);
-        else if (p.purpose == "gyroscope")      gyrVec  = extractVector(p, data);
-        else if (p.purpose == "magnetic_field") magVec  = extractVector(p, data);
-        else if (p.purpose == "quaternion")     quatVec = extractQuaternion(p, data);
-        else if (p.purpose == "barometer")      baroAlt = extractBarometer(p, data);
+        if (p.purpose == PointPurpose::Accelerometer)  accVec  = extractVector(p, data);
+        else if (p.purpose == PointPurpose::Gyroscope)      gyrVec  = extractVector(p, data);
+        else if (p.purpose == PointPurpose::MagneticField)  magVec  = extractVector(p, data);
+        else if (p.purpose == PointPurpose::Quaternion)     quatVec = extractQuaternion(p, data);
+        else if (p.purpose == PointPurpose::Barometer)      baroAlt = extractBarometer(p, data);
     }
 
     // 无加速度数据时不处理（记录首帧警告）
@@ -187,19 +182,27 @@ void PoseProcessor::process(const QString& source, const QString& prefix,
             }
         }
 
-        // 独立运行 Madgwick/Mahony 显示四元数（复用主 Madgwick 结果，仅额外计算 Mahony）
+        // 更新 Madgwick/Mahony 显示用四元数
         if (gyrVec.has_value()) {
             const Vec3d& gyr = gyrVec.value();
-            m_qMadgwick = m_q;
-            if (magVec.has_value()) {
-                m_qMahony = Ahrs::mahonyUpdate9dof(m_qMahony, gyr, acc, magVec.value(), dt,
-                                                    m_mahonyKp, m_mahonyKi, &m_mahonyIntegralFb);
+            if (quatVec.has_value()) {
+                // 传感器直出四元数优先：三者保持一致
+                m_qMadgwick = m_q;
+                m_qMahony   = m_q;
             } else {
-                m_qMahony = Ahrs::mahonyUpdate6dof(m_qMahony, gyr, acc, dt,
-                                                    m_mahonyKp, m_mahonyKi, &m_mahonyIntegralFb);
+                // 无直出四元数：Madgwick 复用主四元数，Mahony 独立运行
+                m_qMadgwick = m_q;
+                if (magVec.has_value()) {
+                    m_qMahony = Ahrs::mahonyUpdate9dof(m_qMahony, gyr, acc, magVec.value(), dt,
+                                                        m_mahonyKp, m_mahonyKi, &m_mahonyIntegralFb);
+                } else {
+                    m_qMahony = Ahrs::mahonyUpdate6dof(m_qMahony, gyr, acc, dt,
+                                                        m_mahonyKp, m_mahonyKi, &m_mahonyIntegralFb);
+                }
             }
         } else if (quatVec.has_value()) {
             m_qMadgwick = m_q;
+            m_qMahony   = m_q;
         }
 
         // 将加速度旋转到世界坐标系，剥离重力
@@ -281,7 +284,6 @@ void PoseProcessor::process(const QString& source, const QString& prefix,
                               m_position[0], m_position[1], m_position[2]);
     }
 
-    Quat4d qMw = MathUtils::quatMultiply(m_qYawCorr, m_qMadgwick);
-    Quat4d qMh = MathUtils::quatMultiply(m_qYawCorr, m_qMahony);
-    emit filterQuaternionsUpdated(qMw, qMh);
+    // 显示用四元数不应用偏航修正（m_qYawCorr 仅用于 INS 位移积分的坐标对齐）
+    emit filterQuaternionsUpdated(m_qMadgwick, m_qMahony);
 }

@@ -97,9 +97,11 @@ private:
     QPoint attitudeHiddenPos()  const;
     QPoint chartVisiblePos()    const;
     QPoint chartHiddenPos()     const;
-    // ── 场景点更新 ──
-    void updateOverlays(const QList<double>& data);
-    void updateSensorCharts(const QList<double>& data);
+    // ── 场景点更新（通过 points 配置提取数据，无硬编码索引）──
+    void updateOverlays(const QString& source, const QString& prefix,
+                        const QList<double>& data);
+    void updateSensorCharts(const QString& source, const QString& prefix,
+                            const QList<double>& data);
 
     // ── 核心对象 ──
     DataReceiver*        m_dataReceiver    = nullptr;
@@ -138,7 +140,7 @@ private:
     qint64  m_lastSerialTime = 0;
 
     // ── 配置缓存 ──
-    bool m_hasQuaternionPoint = false;
+    bool m_hasQuaternionSensor = false;
 
     static constexpr int ATTITUDE_PANEL_MARGIN     = 10;
     static constexpr int CHART_PANEL_SPACING       = 10;
