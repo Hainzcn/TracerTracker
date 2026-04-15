@@ -45,41 +45,41 @@
             "name": "ACC",
             "source": "any",
             "purpose": "accelerometer",
-            "x": { "index": 0, "multiplier": 1.0 },
-            "y": { "index": 1, "multiplier": 1.0 },
-            "z": { "index": 2, "multiplier": 1.0 }
+            "x": { "field": "ax" },
+            "y": { "field": "ay" },
+            "z": { "field": "az" }
         },
         {
             "name": "GYR",
             "source": "any",
             "purpose": "gyroscope",
-            "x": { "index": 3, "multiplier": 1.0 },
-            "y": { "index": 4, "multiplier": 1.0 },
-            "z": { "index": 5, "multiplier": 1.0 }
+            "x": { "field": "gx" },
+            "y": { "field": "gy" },
+            "z": { "field": "gz" }
         },
         {
             "name": "QUAT",
             "source": "any",
             "purpose": "quaternion",
-            "w": { "index": 6, "multiplier": 1.0 },
-            "x": { "index": 7, "multiplier": 1.0 },
-            "y": { "index": 8, "multiplier": 1.0 },
-            "z": { "index": 9, "multiplier": 1.0 }
+            "w": { "field": "q0" },
+            "x": { "field": "q1" },
+            "y": { "field": "q2" },
+            "z": { "field": "q3" }
         },
         {
             "name": "MAG",
             "source": "any",
             "purpose": "magnetic_field",
-            "x": { "index": 10, "multiplier": 1.0 },
-            "y": { "index": 11, "multiplier": 1.0 },
-            "z": { "index": 12, "multiplier": 1.0 }
+            "x": { "field": "mx" },
+            "y": { "field": "my" },
+            "z": { "field": "mz" }
         },
         {
             "name": "BARO",
             "source": "any",
             "purpose": "barometer",
-            "altitude": { "index": 18, "multiplier": 1.0 },
-            "pressure": { "index": 17, "multiplier": 1.0 }
+            "altitude": { "field": "altitude" },
+            "pressure": { "field": "pressure" }
         },
         {
             "name": "Point G (Prefixed)",

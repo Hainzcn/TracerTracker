@@ -274,8 +274,7 @@ void ToolBar::toggleSerial() {
         QString port = m_serialCombo->currentData().toString();
         auto& cfg = ConfigLoader::instance();
         SerialConfig sCfg = cfg.getSerialConfig();
-        m_recv->startSerial(port, sCfg.baudrate, sCfg.protocol,
-                            sCfg.accFsr, sCfg.gyroFsr);
+        m_recv->startSerial(port, sCfg.baudrate, sCfg.protocol);
         m_serialToggle->setText("关闭串口");
         m_serialToggle->setStyleSheet(Styles::STYLE_BTN_ACTIVE());
         m_serialCombo->setEnabled(false);

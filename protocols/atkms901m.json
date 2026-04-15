@@ -1,0 +1,92 @@
+{
+    "name": "atkms901m",
+    "description": "ATK-MS901M 9-axis IMU (binary protocol)",
+
+    "variables": {
+        "acc_fsr": 4,
+        "gyro_fsr": 2000
+    },
+
+    "framing": {
+        "type": "header_length",
+        "sync_bytes": "5555",
+        "id_offset": 2,
+        "id_bytes": 1,
+        "length_offset": 3,
+        "length_bytes": 1,
+        "length_includes_header": false,
+        "max_payload": 64,
+        "checksum": {
+            "type": "sum8",
+            "scope": "all_except_last"
+        }
+    },
+
+    "frames": [
+        {
+            "id": 1,
+            "name": "attitude",
+            "expected_length": 6,
+            "fields": [
+                { "name": "roll",  "offset": 0, "type": "int16_le", "scale": "180.0 / 32768.0" },
+                { "name": "pitch", "offset": 2, "type": "int16_le", "scale": "180.0 / 32768.0" },
+                { "name": "yaw",   "offset": 4, "type": "int16_le", "scale": "180.0 / 32768.0" }
+            ]
+        },
+        {
+            "id": 2,
+            "name": "quaternion",
+            "expected_length": 8,
+            "fields": [
+                { "name": "q0", "offset": 0, "type": "int16_le", "scale": "1.0 / 32768.0" },
+                { "name": "q1", "offset": 2, "type": "int16_le", "scale": "1.0 / 32768.0" },
+                { "name": "q2", "offset": 4, "type": "int16_le", "scale": "1.0 / 32768.0" },
+                { "name": "q3", "offset": 6, "type": "int16_le", "scale": "1.0 / 32768.0" }
+            ]
+        },
+        {
+            "id": 3,
+            "name": "gyro_acc",
+            "trigger": true,
+            "expected_length": 12,
+            "fields": [
+                { "name": "ax", "offset": 0,  "type": "int16_le", "scale": "$acc_fsr * 9.8 / 32768.0" },
+                { "name": "ay", "offset": 2,  "type": "int16_le", "scale": "$acc_fsr * 9.8 / 32768.0" },
+                { "name": "az", "offset": 4,  "type": "int16_le", "scale": "$acc_fsr * 9.8 / 32768.0" },
+                { "name": "gx", "offset": 6,  "type": "int16_le", "scale": "$gyro_fsr * 0.017453293 / 32768.0" },
+                { "name": "gy", "offset": 8,  "type": "int16_le", "scale": "$gyro_fsr * 0.017453293 / 32768.0" },
+                { "name": "gz", "offset": 10, "type": "int16_le", "scale": "$gyro_fsr * 0.017453293 / 32768.0" }
+            ]
+        },
+        {
+            "id": 4,
+            "name": "mag_temp",
+            "expected_length": 8,
+            "fields": [
+                { "name": "mx",   "offset": 0, "type": "int16_le", "scale": 1.0 },
+                { "name": "my",   "offset": 2, "type": "int16_le", "scale": 1.0 },
+                { "name": "mz",   "offset": 4, "type": "int16_le", "scale": 1.0 },
+                { "name": "temp", "offset": 6, "type": "int16_le", "scale": 0.01 }
+            ]
+        },
+        {
+            "id": 5,
+            "name": "baro_alt",
+            "expected_length": 10,
+            "fields": [
+                { "name": "pressure", "offset": 0, "type": "int32_le", "scale": 1.0 },
+                { "name": "altitude", "offset": 4, "type": "int32_le", "scale": 0.01 }
+            ]
+        }
+    ],
+
+    "snapshot_order": [
+        "ax", "ay", "az",
+        "gx", "gy", "gz",
+        "q0", "q1", "q2", "q3",
+        "mx", "my", "mz",
+        "temp",
+        "roll", "pitch", "yaw",
+        "pressure", "altitude"
+    ]
+}

@@ -2,5 +2,6 @@
     <qresource prefix="/">
         <file>svg/icons/Menu.svg</file>
         <file>svg/icons/Cog.svg</file>
+        <file>svg/icons/Settings.svg</file>
     </qresource>
 </RCC>

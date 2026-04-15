@@ -325,4 +325,51 @@ QPushButton:pressed { color: #dddddd; background: rgba(180,180,180,60); }
 )";
 }
 
+// ── 协议配置侧滑面板样式 ────────────────────────────────────
+
+inline QString CONFIG_PANEL_STYLE() {
+    return R"(
+QWidget#configPanel {
+    background-color: #252526;
+    border-right: 1px solid #333333;
+}
+QWidget#configPanel QLabel {
+    color: #cccccc;
+    font-size: 12px;
+    font-family: 'Microsoft YaHei', sans-serif;
+    border: none;
+}
+QWidget#configPanel QLabel#sectionTitle {
+    color: #e0e0e0;
+    font-size: 13px;
+    font-weight: bold;
+    padding: 4px 0px;
+}
+QWidget#configPanel QLabel#descLabel {
+    color: #999999;
+    font-size: 11px;
+}
+QWidget#configPanel QLabel#fieldListLabel {
+    color: #aaaaaa;
+    font-size: 11px;
+    font-family: Consolas, monospace;
+}
+)";
+}
+
+inline QString CONFIG_PANEL_SEPARATOR_STYLE() {
+    return "background-color: #333333; min-height: 1px; max-height: 1px;";
+}
+
+inline QString CONFIG_PANEL_CLOSE_BTN_STYLE() {
+    return R"(
+QPushButton {
+    color: #999999; background: transparent; border: none;
+    border-radius: 4px; font-size: 14px; padding: 2px 6px;
+}
+QPushButton:hover { color: #ffffff; background: #333333; }
+QPushButton:pressed { background: #1e1e1e; }
+)";
+}
+
 } // namespace Styles

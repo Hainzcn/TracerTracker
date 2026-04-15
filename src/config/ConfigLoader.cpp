@@ -7,6 +7,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QSet>
+#include <QVariantMap>
 
 // ============================================================
 // ConfigLoader.cpp — 配置加载器实现
@@ -46,6 +47,33 @@ QString ConfigLoader::configFilePath() {
     }
     // 找不到时返回 appDir 下的路径（将创建新文件）
     return path;
+}
+
+// 查找 protocols/<name>.json 的路径
+QString ConfigLoader::protocolFilePath(const QString& protocolName)
+{
+    // 如果是绝对路径或带目录分隔符，直接当文件路径使用
+    if (protocolName.contains('/') || protocolName.contains('\\')) {
+        if (QFile::exists(protocolName)) return protocolName;
+    }
+
+    QString fileName = protocolName;
+    if (!fileName.endsWith(".json")) fileName += ".json";
+
+    // 在应用程序目录的 protocols/ 下查找
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString path = appDir + "/protocols/" + fileName;
+    if (QFile::exists(path)) return path;
+
+    // 开发模式：从工作目录向上查找
+    QDir dir = QDir::current();
+    for (int i = 0; i < 4; ++i) {
+        QString candidate = dir.absoluteFilePath("protocols/" + fileName);
+        if (QFile::exists(candidate)) return candidate;
+        if (!dir.cdUp()) break;
+    }
+
+    return QString();
 }
 
 // ── 默认 JSON 构造 ────────────────────────────────────────────
@@ -108,7 +136,13 @@ QJsonObject ConfigLoader::buildDefaultJson() {
     ins["filter_yaw_offset_deg"] = 90.0;
     root["ins"] = ins;
 
-    // 数据点默认配置列表
+    // 数据点默认配置列表（传感器 points 使用 field 名引用）
+    auto makeField = [](const QString& field, double mult = 1.0) -> QJsonObject {
+        QJsonObject a;
+        a["field"]      = field;
+        a["multiplier"] = mult;
+        return a;
+    };
     auto makeAxis = [](int idx, double mult) -> QJsonObject {
         QJsonObject a;
         a["index"]      = idx;
@@ -119,33 +153,33 @@ QJsonObject ConfigLoader::buildDefaultJson() {
     QJsonArray points;
     {
         QJsonObject p;
-        p["name"] = "ACC"; p["source"] = "serial"; p["purpose"] = "accelerometer";
-        p["x"] = makeAxis(0,1); p["y"] = makeAxis(1,1); p["z"] = makeAxis(2,1);
+        p["name"] = "ACC"; p["source"] = "any"; p["purpose"] = "accelerometer";
+        p["x"] = makeField("ax"); p["y"] = makeField("ay"); p["z"] = makeField("az");
         points.append(p);
     }
     {
         QJsonObject p;
-        p["name"] = "GYR"; p["source"] = "serial"; p["purpose"] = "gyroscope";
-        p["x"] = makeAxis(3,1); p["y"] = makeAxis(4,1); p["z"] = makeAxis(5,1);
+        p["name"] = "GYR"; p["source"] = "any"; p["purpose"] = "gyroscope";
+        p["x"] = makeField("gx"); p["y"] = makeField("gy"); p["z"] = makeField("gz");
         points.append(p);
     }
     {
         QJsonObject p;
-        p["name"] = "QUAT"; p["source"] = "serial"; p["purpose"] = "quaternion";
-        p["w"] = makeAxis(6,1); p["x"] = makeAxis(7,1);
-        p["y"] = makeAxis(8,1); p["z"] = makeAxis(9,1);
+        p["name"] = "QUAT"; p["source"] = "any"; p["purpose"] = "quaternion";
+        p["w"] = makeField("q0"); p["x"] = makeField("q1");
+        p["y"] = makeField("q2"); p["z"] = makeField("q3");
         points.append(p);
     }
     {
         QJsonObject p;
-        p["name"] = "MAG"; p["source"] = "serial"; p["purpose"] = "magnetic_field";
-        p["x"] = makeAxis(10,1); p["y"] = makeAxis(11,1); p["z"] = makeAxis(12,1);
+        p["name"] = "MAG"; p["source"] = "any"; p["purpose"] = "magnetic_field";
+        p["x"] = makeField("mx"); p["y"] = makeField("my"); p["z"] = makeField("mz");
         points.append(p);
     }
     {
         QJsonObject p;
-        p["name"] = "BARO"; p["source"] = "serial"; p["purpose"] = "barometer";
-        p["altitude"] = makeAxis(18,1); p["pressure"] = makeAxis(17,1);
+        p["name"] = "BARO"; p["source"] = "any"; p["purpose"] = "barometer";
+        p["altitude"] = makeField("altitude"); p["pressure"] = makeField("pressure");
         points.append(p);
     }
     root["points"] = points;
@@ -196,6 +230,7 @@ void ConfigLoader::reload() {
         QJsonDocument doc = QJsonDocument::fromJson(data, &err);
         if (err.error == QJsonParseError::NoError && doc.isObject()) {
             m_config = mergeWithDefaults(doc.object(), defaults);
+            loadProtocol();
             rebuildPointsCache();
             qDebug() << "ConfigLoader: 已从" << path << "加载配置";
             if (m_config != doc.object()) {
@@ -210,6 +245,7 @@ void ConfigLoader::reload() {
     }
 
     m_config = defaults;
+    loadProtocol();
     rebuildPointsCache();
     save();
 }
@@ -230,13 +266,14 @@ void ConfigLoader::save() const {
 
 // ── 辅助解析 ──────────────────────────────────────────────────
 
-// 从 JSON 对象解析轴映射（index + multiplier）
+// 从 JSON 对象解析轴映射（index / field + multiplier）
 AxisMapping ConfigLoader::parseAxisMapping(const QJsonObject& obj,
                                             int defaultIndex,
                                             double defaultMult) {
     AxisMapping m;
     m.index      = obj.value("index").toInt(defaultIndex);
     m.multiplier = obj.value("multiplier").toDouble(defaultMult);
+    m.field      = obj.value("field").toString();
     return m;
 }
 
@@ -351,6 +388,75 @@ InsConfig ConfigLoader::getInsConfig() const {
     return c;
 }
 
+// ── 协议加载 ─────────────────────────────────────────────────
+
+void ConfigLoader::loadProtocol()
+{
+    m_protocolDef = QJsonObject();
+    m_fieldIndexMap.clear();
+
+    QString protocolName = m_config.value("serial").toObject()
+                               .value("protocol").toString();
+    if (protocolName.isEmpty() || protocolName == "csv") {
+        qDebug() << "ConfigLoader: 协议为 CSV 或空，跳过协议定义加载";
+        return;
+    }
+
+    QString path = protocolFilePath(protocolName);
+    if (path.isEmpty()) {
+        qWarning() << "ConfigLoader: 未找到协议文件" << protocolName;
+        return;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "ConfigLoader: 无法打开协议文件" << path;
+        return;
+    }
+
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &err);
+    file.close();
+
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "ConfigLoader: 协议文件 JSON 解析失败:" << err.errorString();
+        return;
+    }
+
+    m_protocolDef = doc.object();
+
+    // 构建 field name → snapshot index 映射
+    QJsonArray orderArr = m_protocolDef.value("snapshot_order").toArray();
+    for (int i = 0; i < orderArr.size(); ++i) {
+        QString name = orderArr[i].toString();
+        if (!name.isEmpty())
+            m_fieldIndexMap[name] = i;
+    }
+
+    qDebug() << "ConfigLoader: 已加载协议" << protocolName
+             << "(" << m_fieldIndexMap.size() << "个字段)";
+}
+
+QVariantMap ConfigLoader::getProtocolVariableOverrides() const
+{
+    QVariantMap overrides;
+    QJsonObject serial = m_config.value("serial").toObject();
+
+    if (serial.contains("acc_fsr"))
+        overrides["acc_fsr"] = serial.value("acc_fsr").toDouble();
+    if (serial.contains("gyro_fsr"))
+        overrides["gyro_fsr"] = serial.value("gyro_fsr").toDouble();
+
+    return overrides;
+}
+
+int ConfigLoader::resolveFieldIndex(const QString& fieldName) const
+{
+    return m_fieldIndexMap.value(fieldName, -1);
+}
+
+// ── Points 缓存 ──────────────────────────────────────────────
+
 void ConfigLoader::rebuildPointsCache() {
     QJsonArray arr = m_config.value("points").toArray();
     m_cachedPoints.clear();
@@ -360,7 +466,37 @@ void ConfigLoader::rebuildPointsCache() {
             m_cachedPoints.append(parsePointConfig(v.toObject()));
         }
     }
+    resolveFieldNames();
     validatePointsCache();
+}
+
+// 将 AxisMapping 中的 field 名解析为 index（通过协议 snapshot_order）
+void ConfigLoader::resolveFieldNames()
+{
+    if (m_fieldIndexMap.isEmpty()) return;
+
+    auto resolveAxis = [this](AxisMapping& axis, const QString& ctx) {
+        if (axis.field.isEmpty()) return;
+        int idx = m_fieldIndexMap.value(axis.field, -1);
+        if (idx < 0) {
+            qWarning() << "ConfigLoader:" << ctx
+                       << "field '" + axis.field + "' 在协议 snapshot_order 中未找到";
+        } else {
+            axis.index = idx;
+        }
+    };
+
+    for (int i = 0; i < m_cachedPoints.size(); ++i) {
+        PointConfig& p = m_cachedPoints[i];
+        QString ctx = QString("points[%1] name='%2'").arg(i).arg(p.name);
+
+        resolveAxis(p.x, ctx + " x");
+        resolveAxis(p.y, ctx + " y");
+        resolveAxis(p.z, ctx + " z");
+        resolveAxis(p.w, ctx + " w");
+        resolveAxis(p.altitude, ctx + " altitude");
+        resolveAxis(p.pressure, ctx + " pressure");
+    }
 }
 
 void ConfigLoader::validatePointsCache() {
@@ -454,4 +590,120 @@ bool ConfigLoader::hasSensorPurpose(const QString& purpose) const {
         if (p.purpose == purpose) return true;
     }
     return false;
+}
+
+// ── 协议管理 ──────────────────────────────────────────────────
+
+QStringList ConfigLoader::availableProtocols()
+{
+    QStringList result;
+
+    auto scanDir = [&](const QString& dirPath) {
+        QDir dir(dirPath);
+        if (!dir.exists()) return;
+        QStringList entries = dir.entryList({"*.json"}, QDir::Files);
+        for (const QString& f : entries) {
+            QString name = f.chopped(5); // remove ".json"
+            if (!result.contains(name))
+                result.append(name);
+        }
+    };
+
+    // 应用程序目录下
+    scanDir(QCoreApplication::applicationDirPath() + "/protocols");
+
+    // 开发模式：从工作目录向上查找
+    QDir dir = QDir::current();
+    for (int i = 0; i < 4; ++i) {
+        scanDir(dir.absoluteFilePath("protocols"));
+        if (!dir.cdUp()) break;
+    }
+
+    result.sort();
+    return result;
+}
+
+QJsonObject ConfigLoader::loadProtocolDef(const QString& name)
+{
+    if (name.isEmpty() || name == "csv") return QJsonObject();
+
+    QString path = protocolFilePath(name);
+    if (path.isEmpty()) return QJsonObject();
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return QJsonObject();
+
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &err);
+    file.close();
+
+    if (err.error != QJsonParseError::NoError || !doc.isObject())
+        return QJsonObject();
+
+    return doc.object();
+}
+
+void ConfigLoader::updateProtocolAndMappings(const QString& protocol,
+                                              const QVariantMap& vars,
+                                              const QList<PointConfig>& sensorPoints)
+{
+    // 更新 serial.protocol 和变量
+    QJsonObject serial = m_config.value("serial").toObject();
+    serial["protocol"] = protocol;
+    for (auto it = vars.begin(); it != vars.end(); ++it)
+        serial[it.key()] = QJsonValue::fromVariant(it.value());
+    m_config["serial"] = serial;
+
+    // 重建 points 数组：保留非 sensor 的 points，用新的 sensorPoints 替换 sensor 类型的
+    QJsonArray newPointsArr;
+
+    // 保留现有的纯可视化 points（purpose 为空）
+    QJsonArray oldArr = m_config.value("points").toArray();
+    for (const QJsonValue& v : oldArr) {
+        QJsonObject obj = v.toObject();
+        QString purpose = obj.value("purpose").toString();
+        if (!PointPurpose::isSensor(purpose))
+            newPointsArr.append(obj);
+    }
+
+    // 序列化新的 sensor points
+    auto serializeAxis = [](const AxisMapping& axis) -> QJsonObject {
+        QJsonObject obj;
+        if (!axis.field.isEmpty())
+            obj["field"] = axis.field;
+        else
+            obj["index"] = axis.index;
+        if (std::abs(axis.multiplier - 1.0) > 1e-9)
+            obj["multiplier"] = axis.multiplier;
+        return obj;
+    };
+
+    for (const PointConfig& p : sensorPoints) {
+        QJsonObject obj;
+        obj["name"]    = p.name;
+        obj["source"]  = p.source;
+        obj["purpose"] = p.purpose;
+
+        if (p.purpose == PointPurpose::Barometer) {
+            obj["altitude"] = serializeAxis(p.altitude);
+            obj["pressure"] = serializeAxis(p.pressure);
+        } else if (p.purpose == PointPurpose::Quaternion) {
+            obj["w"] = serializeAxis(p.w);
+            obj["x"] = serializeAxis(p.x);
+            obj["y"] = serializeAxis(p.y);
+            obj["z"] = serializeAxis(p.z);
+        } else {
+            obj["x"] = serializeAxis(p.x);
+            obj["y"] = serializeAxis(p.y);
+            obj["z"] = serializeAxis(p.z);
+        }
+
+        newPointsArr.prepend(obj);
+    }
+
+    m_config["points"] = newPointsArr;
+
+    save();
+    loadProtocol();
+    rebuildPointsCache();
 }

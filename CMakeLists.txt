@@ -49,6 +49,7 @@ set(SOURCES
     src/ins/Filters.cpp
     src/ins/PoseProcessor.cpp
     src/io/Ms901mStreamParser.cpp
+    src/io/GenericFrameParser.cpp
     src/io/DataReceiver.cpp
     src/ui/opengl/Viewer3D.cpp
     src/ui/opengl/GridRenderer.cpp
@@ -62,6 +63,7 @@ set(SOURCES
     src/ui/ViewOrientationGizmo.cpp
     src/ui/MainWindow.cpp
     src/ui/SideBar.cpp
+    src/ui/ProtocolConfigPanel.cpp
     src/ui/LegacyHotZone.cpp
     resources/resources.qrc
 )

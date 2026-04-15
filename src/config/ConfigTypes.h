@@ -71,8 +71,9 @@ struct InsConfig {
 
 // 轴向分量索引与乘数
 struct AxisMapping {
-    int    index      = 0;   // 数据数组下标
+    int    index      = 0;   // 数据数组下标（可由 field 在加载时解析得到）
     double multiplier = 1.0; // 换算乘数
+    QString field;           // 协议字段名引用（可选，如 "ax"），加载时解析为 index
 };
 
 // 合法的 purpose 值集合

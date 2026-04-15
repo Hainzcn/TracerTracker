@@ -36,6 +36,7 @@ class AttitudeWidget;
 class SensorChartPanel;
 class SensorInfoOverlay;
 class ViewOrientationGizmo;
+class ProtocolConfigPanel;
 class DataReceiver;
 class PoseProcessor;
 
@@ -84,6 +85,8 @@ public slots:
     void toggleAttitudePanel();
     // 切换 SensorChartPanel 显隐（带动画）
     void toggleSensorChartPanel();
+    // 切换协议配置面板显隐（带动画）
+    void toggleConfigPanel();
 
 private:
     // ── 布局搭建 ──
@@ -117,6 +120,7 @@ private:
     SensorInfoOverlay*   m_sensorOverlay   = nullptr;
     ViewOrientationGizmo* m_gizmo          = nullptr;
     QPushButton*         m_projToggleBtn   = nullptr;
+    ProtocolConfigPanel* m_configPanel     = nullptr;
 
     // ── 状态栏控件 ──
     QWidget*   m_statusBarWidget   = nullptr;
@@ -131,8 +135,10 @@ private:
     // ── 面板动画 ──
     QPropertyAnimation* m_attitudePanelAnim    = nullptr;
     QPropertyAnimation* m_sensorChartPanelAnim = nullptr;
+    QPropertyAnimation* m_configPanelAnim      = nullptr;
     bool m_attitudePanelExpanded    = false;
     bool m_sensorChartPanelExpanded = false;
+    bool m_configPanelExpanded      = false;
 
     // ── 状态计时 ──
     QTimer* m_statusTimer    = nullptr;

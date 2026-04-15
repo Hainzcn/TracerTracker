@@ -1,12 +1,15 @@
 #pragma once
 #include "ConfigTypes.h"
 #include <QJsonObject>
+#include <QMap>
 #include <QString>
 #include <QList>
+#include <QVariantMap>
 
 // ============================================================
 // ConfigLoader.h — 配置加载器（单例）
 // 负责读取/写入 config.json，并与硬编码默认值深度合并
+// 同时加载协议定义文件（protocols/*.json），提供字段名→索引解析
 // ============================================================
 
 class ConfigLoader {
@@ -20,23 +23,15 @@ public:
 
     // ── 配置读取 ────────────────────────────────────────────
 
-    // 获取 UDP 配置
     UdpConfig         getUdpConfig() const;
-
-    // 获取串口配置
     SerialConfig      getSerialConfig() const;
-
-    // 获取渲染调试配置
     RenderDebugConfig getRenderDebugConfig() const;
-
-    // 获取 INS（惯性导航系统）配置
     InsConfig         getInsConfig() const;
 
     // 获取全部数据点配置列表（缓存，仅 reload 时重新解析）
     const QList<PointConfig>& getPoints() const;
 
     // 按 purpose + source/prefix 查找第一个匹配的传感器点
-    // 返回 nullptr 表示未找到
     const PointConfig* findSensorPoint(const QString& purpose,
                                        const QString& source,
                                        const QString& prefix) const;
@@ -44,44 +39,65 @@ public:
     // 判断是否存在指定 purpose 的传感器点（不考虑 source/prefix）
     bool hasSensorPurpose(const QString& purpose) const;
 
-    // 获取重力参考值（m/s²）
     double gravityReference() const;
+
+    // ── 协议定义 ────────────────────────────────────────────
+
+    // 获取当前已加载的协议定义（完整 JSON，可传给 GenericFrameParser::fromJson）
+    const QJsonObject& getProtocolDef() const { return m_protocolDef; }
+
+    // 获取协议变量覆盖（serial.acc_fsr / gyro_fsr 等）
+    QVariantMap getProtocolVariableOverrides() const;
+
+    // 字段名 → snapshot_order 中的数组下标（-1 表示未找到）
+    int resolveFieldIndex(const QString& fieldName) const;
+
+    // 是否已成功加载协议定义
+    bool hasProtocol() const { return !m_protocolDef.isEmpty(); }
+
+    // ── 协议管理 ────────────────────────────────────────────
+
+    // 扫描 protocols/ 目录，返回可用协议名列表（不含 .json 后缀）
+    static QStringList availableProtocols();
+
+    // 加载指定协议定义 JSON（仅返回，不改变当前活跃协议状态）
+    static QJsonObject loadProtocolDef(const QString& name);
+
+    // 批量更新协议选择 + 变量覆盖 + 传感器 points，然后 save + reload
+    void updateProtocolAndMappings(const QString& protocol,
+                                   const QVariantMap& vars,
+                                   const QList<PointConfig>& sensorPoints);
 
     // ── 持久化 ──────────────────────────────────────────────
 
-    // 将当前配置回写到 config.json
     void save() const;
-
-    // 重新从磁盘加载配置（会覆盖当前内存配置）
     void reload();
 
 private:
-    // 私有构造函数（单例模式）
     ConfigLoader();
 
-    // 查找 config.json 的绝对路径（exe 同目录）
     static QString configFilePath();
+    static QString protocolFilePath(const QString& protocolName);
 
-    // 将从文件读取的 JSON 对象与默认值深度合并
     static QJsonObject mergeWithDefaults(const QJsonObject& loaded,
                                          const QJsonObject& defaults);
 
-    // 解析单个 AxisMapping（包含 index 与 multiplier）
     static AxisMapping parseAxisMapping(const QJsonObject& obj,
                                         int defaultIndex = 0,
                                         double defaultMult = 1.0);
-
-    // 解析单个 PointConfig 条目
     static PointConfig parsePointConfig(const QJsonObject& obj);
-
-    // 构造包含所有默认值的 QJsonObject
     static QJsonObject buildDefaultJson();
 
-    // 当前配置（已与默认值合并的 JSON 根对象）
     QJsonObject m_config;
 
-    // 缓存的点配置列表（在 reload 时刷新）
+    // 协议定义（从 protocols/<name>.json 加载）
+    QJsonObject m_protocolDef;
+    QMap<QString, int> m_fieldIndexMap;
+    void loadProtocol();
+
+    // 缓存的点配置列表
     QList<PointConfig> m_cachedPoints;
     void rebuildPointsCache();
     void validatePointsCache();
+    void resolveFieldNames();
 };

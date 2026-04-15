@@ -7,6 +7,7 @@
 #include "SensorChartPanel.h"
 #include "SensorInfoOverlay.h"
 #include "ViewOrientationGizmo.h"
+#include "ProtocolConfigPanel.h"
 #include "opengl/Viewer3D.h"
 #include "../io/DataReceiver.h"
 #include "../ins/PoseProcessor.h"
@@ -62,6 +63,10 @@ MainWindow::MainWindow(QWidget* parent)
         if (m_sensorChartPanelExpanded != checked) toggleSensorChartPanel();
     });
 
+    connect(m_sideBar->configBtn(), &QPushButton::clicked, this, [this]() {
+        toggleConfigPanel();
+    });
+
     connect(m_sideBar->settingsBtn(), &QPushButton::clicked, this, [this]() {
         onViewerLog("Settings button clicked (Placeholder)");
     });
@@ -102,7 +107,25 @@ MainWindow::MainWindow(QWidget* parent)
     });
     m_projToggleBtn->show();
 
+    // ── 协议配置面板（浮动在 Viewer3D 左侧）──
+    m_configPanel = new ProtocolConfigPanel(m_viewer);
+    m_configPanel->setVisible(false);
+    connect(m_configPanel, &ProtocolConfigPanel::closeRequested, this, &MainWindow::toggleConfigPanel);
+    connect(m_configPanel, &ProtocolConfigPanel::applied, this, [this]() {
+        m_hasQuaternionSensor = ConfigLoader::instance().hasSensorPurpose(PointPurpose::Quaternion);
+        onViewerLog("协议配置已应用");
+    });
+
     // ── 面板动画 ──
+    m_configPanelAnim = new QPropertyAnimation(m_configPanel, "pos", this);
+    m_configPanelAnim->setDuration(200);
+    m_configPanelAnim->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_configPanelAnim, &QPropertyAnimation::finished, this, [this]() {
+        if (!m_configPanelExpanded) {
+            m_configPanel->setVisible(false);
+        }
+    });
+
     m_attitudePanelAnim = new QPropertyAnimation(m_attitudeWidget, "pos", this);
     m_attitudePanelAnim->setDuration(ATTITUDE_PANEL_ANIM_MS);
     m_attitudePanelAnim->setEasingCurve(QEasingCurve::OutCubic);
@@ -291,6 +314,15 @@ void MainWindow::repositionOverlays() {
     syncAttitudeOverlayGeometry();
     syncSensorChartGeometry();
 
+    // 协议配置面板高度跟随 Viewer3D
+    if (m_configPanel->isVisible()) {
+        m_configPanel->setFixedHeight(vh);
+        if (m_configPanelAnim->state() != QAbstractAnimation::Running) {
+            m_configPanel->move(m_configPanelExpanded ? 0 : -m_configPanel->width(), 0);
+        }
+        m_configPanel->raise();
+    }
+
     // SensorInfoOverlay：右下角
     m_sensorOverlay->adjustSize();
     m_sensorOverlay->move(vw - m_sensorOverlay->width() - mg,
@@ -373,6 +405,45 @@ void MainWindow::toggleSensorChartPanel() {
 
 void MainWindow::onSensorChartPanelAnimFinished() {
     syncSensorChartGeometry();
+}
+
+// ── 协议配置面板滑入/出 ─────────────────────────────────────
+
+void MainWindow::toggleConfigPanel() {
+    int panelW = m_configPanel->width();
+    int viewH  = m_viewer->height();
+    m_configPanel->setFixedHeight(viewH);
+
+    QPoint hiddenPos(-panelW, 0);
+    QPoint visiblePos(0, 0);
+    QPoint current;
+
+    if (m_configPanelAnim->state() == QAbstractAnimation::Running) {
+        m_configPanelAnim->stop();
+        current = m_configPanel->pos();
+    } else if (m_configPanel->isVisible()) {
+        current = m_configPanel->pos();
+    } else {
+        current = hiddenPos;
+        m_configPanel->move(current);
+    }
+
+    m_configPanelExpanded = !m_configPanelExpanded;
+    if (m_sideBar->configBtn()->isChecked() != m_configPanelExpanded)
+        m_sideBar->configBtn()->setChecked(m_configPanelExpanded);
+
+    QPoint target = m_configPanelExpanded ? visiblePos : hiddenPos;
+    m_configPanelAnim->setEasingCurve(
+        m_configPanelExpanded ? QEasingCurve::OutCubic : QEasingCurve::InCubic);
+
+    if (m_configPanelExpanded)
+        m_configPanel->loadFromConfig();
+
+    m_configPanel->setVisible(true);
+    m_configPanel->raise();
+    m_configPanelAnim->setStartValue(current);
+    m_configPanelAnim->setEndValue(target);
+    m_configPanelAnim->start();
 }
 
 // ── 数据处理 ─────────────────────────────────────────────────
