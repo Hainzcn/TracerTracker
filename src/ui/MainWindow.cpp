@@ -117,27 +117,62 @@ MainWindow::MainWindow(QWidget* parent)
     });
 
     // ── 面板动画 ──
+    // 协议配置面板覆盖在 QOpenGLWidget (Viewer3D) 之上。Qt6 已知：
+    //   "Once a QOpenGLWidget is added to a hierarchy, the entire top-level
+    //    window switches to OpenGL-based compositing. The window's backing
+    //    store is not always correctly invalidated by the underlying platform
+    //    when the child widget moves/hides."
+    // 因此当面板 hide/move 出 viewer 范围后，OpenGL 合成层会保留上一帧子
+    // 控件的像素，必须由我们主动驱动 viewer 重绘 + 收尾时同步 repaint 才
+    // 能彻底擦除。X 关闭路径之所以"看起来正常"，是因为 closeBtn 在面板
+    // 内部触发的 hover-leave / focus-out 链恰好顺带刷新了一次 viewer；
+    // 而点击侧栏按钮关闭时，鼠标全程在 viewer 之外，没有副作用刷新，
+    // 残留就裸露出来了。
     m_configPanelAnim = new QPropertyAnimation(m_configPanel, "pos", this);
     m_configPanelAnim->setDuration(200);
     m_configPanelAnim->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_configPanelAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant&) {
+        if (m_viewer) m_viewer->update();
+    });
     connect(m_configPanelAnim, &QPropertyAnimation::finished, this, [this]() {
         if (m_configPanelExpanded) {
             m_configPanel->move(0, 0);
+            if (m_viewer) m_viewer->update();
         } else {
-            m_configPanel->move(-ProtocolConfigPanel::PANEL_WIDTH, 0);
+            // 关键：hide() 必须发生在 move() 之前。setVisible(false) 会让
+            // Qt 主动把子控件从 OpenGL 合成层里摘除并刷新被让出的区域；
+            // 反过来若先 move() 到 (-PANEL_WIDTH, 0) 再 hide()，合成器可
+            // 能仍然把"上一帧位置"上的子控件像素留在 backing store 里。
             m_configPanel->setVisible(false);
+            m_configPanel->move(-ProtocolConfigPanel::PANEL_WIDTH, 0);
+            // 收尾必须同步 repaint：update() 只是 schedule，事件循环可能
+            // 把它和动画的最后一帧合并成一次 paint，结果落在 hide 之前。
+            // repaint() 强制立刻走一次 paintGL，glClear 把 FBO 整个清掉，
+            // 之后合成器用最新（已 hide）的子控件状态做合成，确保干净。
+            if (m_viewer) {
+                m_viewer->repaint();
+                // 顶层窗口的 backing store 也可能持有旧像素（Qt6 OpenGL
+                // 合成路径下的已知问题），追加一次 update 兜底。
+                if (auto* top = m_viewer->window()) top->update();
+            }
         }
     });
 
     m_attitudePanelAnim = new QPropertyAnimation(m_attitudeWidget, "pos", this);
     m_attitudePanelAnim->setDuration(ATTITUDE_PANEL_ANIM_MS);
     m_attitudePanelAnim->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_attitudePanelAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant&) {
+        if (m_viewer) m_viewer->update();
+    });
     connect(m_attitudePanelAnim, &QPropertyAnimation::finished,
             this, &MainWindow::onAttitudePanelAnimFinished);
 
     m_sensorChartPanelAnim = new QPropertyAnimation(m_sensorChart, "pos", this);
     m_sensorChartPanelAnim->setDuration(ATTITUDE_PANEL_ANIM_MS);
     m_sensorChartPanelAnim->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_sensorChartPanelAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant&) {
+        if (m_viewer) m_viewer->update();
+    });
     connect(m_sensorChartPanelAnim, &QPropertyAnimation::finished,
             this, &MainWindow::onSensorChartPanelAnimFinished);
 
@@ -375,6 +410,7 @@ void MainWindow::toggleAttitudePanel() {
 
 void MainWindow::onAttitudePanelAnimFinished() {
     syncAttitudeOverlayGeometry();
+    if (m_viewer) m_viewer->update();
 }
 
 void MainWindow::toggleSensorChartPanel() {
@@ -408,6 +444,7 @@ void MainWindow::toggleSensorChartPanel() {
 
 void MainWindow::onSensorChartPanelAnimFinished() {
     syncSensorChartGeometry();
+    if (m_viewer) m_viewer->update();
 }
 
 // ── 协议配置面板滑入/出 ─────────────────────────────────────
@@ -419,10 +456,12 @@ void MainWindow::toggleConfigPanel() {
     if (m_configPanel->width() != panelW)
         m_configPanel->resize(panelW, viewH);
 
-    QPoint hiddenPos(-panelW, 0);
-    QPoint visiblePos(0, 0);
+    const QPoint hiddenPos(-panelW, 0);
+    const QPoint visiblePos(0, 0);
     QPoint current;
 
+    // 若上一段动画还在运行，必须先 stop 并保留当前帧位置作为起点。
+    // 注意：QPropertyAnimation::stop() 不会回退到 endValue，pos() 即真实位置。
     if (m_configPanelAnim->state() == QAbstractAnimation::Running) {
         m_configPanelAnim->stop();
         current = m_configPanel->pos();
@@ -434,10 +473,12 @@ void MainWindow::toggleConfigPanel() {
     }
 
     m_configPanelExpanded = !m_configPanelExpanded;
+    // 同步 SideBar 按钮 checked 态。无论触发路径（X 关闭 vs 侧栏按钮）都
+    // 强制对齐，防止状态漂移导致后续切换走错分支。
     if (m_sideBar->configBtn()->isChecked() != m_configPanelExpanded)
         m_sideBar->configBtn()->setChecked(m_configPanelExpanded);
 
-    QPoint target = m_configPanelExpanded ? visiblePos : hiddenPos;
+    const QPoint target = m_configPanelExpanded ? visiblePos : hiddenPos;
     m_configPanelAnim->setEasingCurve(
         m_configPanelExpanded ? QEasingCurve::OutCubic : QEasingCurve::InCubic);
 
@@ -449,6 +490,8 @@ void MainWindow::toggleConfigPanel() {
     m_configPanelAnim->setStartValue(current);
     m_configPanelAnim->setEndValue(target);
     m_configPanelAnim->start();
+    // 起始一帧也驱动一次重绘，避免 QOpenGLWidget 父控件残留上一帧像素
+    if (m_viewer) m_viewer->update();
 }
 
 // ── 数据处理 ─────────────────────────────────────────────────
