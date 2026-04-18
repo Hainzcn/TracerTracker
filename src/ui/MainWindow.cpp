@@ -121,7 +121,10 @@ MainWindow::MainWindow(QWidget* parent)
     m_configPanelAnim->setDuration(200);
     m_configPanelAnim->setEasingCurve(QEasingCurve::OutCubic);
     connect(m_configPanelAnim, &QPropertyAnimation::finished, this, [this]() {
-        if (!m_configPanelExpanded) {
+        if (m_configPanelExpanded) {
+            m_configPanel->move(0, 0);
+        } else {
+            m_configPanel->move(-ProtocolConfigPanel::PANEL_WIDTH, 0);
             m_configPanel->setVisible(false);
         }
     });
@@ -318,7 +321,7 @@ void MainWindow::repositionOverlays() {
     if (m_configPanel->isVisible()) {
         m_configPanel->setFixedHeight(vh);
         if (m_configPanelAnim->state() != QAbstractAnimation::Running) {
-            m_configPanel->move(m_configPanelExpanded ? 0 : -m_configPanel->width(), 0);
+            m_configPanel->move(m_configPanelExpanded ? 0 : -ProtocolConfigPanel::PANEL_WIDTH, 0);
         }
         m_configPanel->raise();
     }
@@ -410,9 +413,11 @@ void MainWindow::onSensorChartPanelAnimFinished() {
 // ── 协议配置面板滑入/出 ─────────────────────────────────────
 
 void MainWindow::toggleConfigPanel() {
-    int panelW = m_configPanel->width();
+    constexpr int panelW = ProtocolConfigPanel::PANEL_WIDTH;
     int viewH  = m_viewer->height();
     m_configPanel->setFixedHeight(viewH);
+    if (m_configPanel->width() != panelW)
+        m_configPanel->resize(panelW, viewH);
 
     QPoint hiddenPos(-panelW, 0);
     QPoint visiblePos(0, 0);

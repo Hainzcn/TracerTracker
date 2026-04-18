@@ -55,6 +55,7 @@ set(SOURCES
     src/ui/opengl/GridRenderer.cpp
     src/ui/opengl/TrackRenderer.cpp
     src/ui/FramelessWindow.cpp
+    src/ui/WindowIcons.cpp
     src/ui/ToolBar.cpp
     src/ui/DebugConsole.cpp
     src/ui/AttitudeWidget.cpp

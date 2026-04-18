@@ -1,8 +1,10 @@
 #include "ProtocolConfigPanel.h"
 #include "Styles.h"
+#include "WindowIcons.h"
 #include "config/ConfigLoader.h"
 #include <QJsonArray>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QDebug>
 
 // ============================================================
@@ -14,9 +16,53 @@ ProtocolConfigPanel::ProtocolConfigPanel(QWidget* parent)
 {
     setObjectName("configPanel");
     setFixedWidth(PANEL_WIDTH);
+    // 显式 resize，避免 QWidget 默认 640×480 在首次显示前导致父级
+    // 按错误宽度计算滑入/滑出位移
+    resize(PANEL_WIDTH, parent ? parent->height() : 480);
+
+    // 确保背景不透明渲染 + 阻止鼠标事件向父 Viewer3D 传递
+    setAttribute(Qt::WA_StyledBackground, true);
+    setAttribute(Qt::WA_NoMousePropagation, true);
+    setAutoFillBackground(true);
+
     setStyleSheet(Styles::CONFIG_PANEL_STYLE());
     buildUI();
     loadFromConfig();
+}
+
+// ── 分级缩进常量 ─────────────────────────────────────────────
+//  L1 段落标题（"协议定义"/"字段映射"）      : 0
+//  L2 子标签（"协议" / "变量" / "ACC" ...）  : 10
+//  L3 具体内容（字段列表、变量表单、映射表） : 22
+
+static constexpr int INDENT_L2 = 10;
+static constexpr int INDENT_L3 = 22;
+
+// ── 辅助：创建带 configSep 对象名的分隔线 ────────────────────
+
+static QFrame* makeSeparator(QWidget* parent) {
+    auto* f = new QFrame(parent);
+    f->setObjectName("configSep");
+    f->setFrameShape(QFrame::NoFrame);
+    return f;
+}
+
+// ── 辅助：将一个 widget 包进带左缩进的 HBox ──────────────────
+
+static QHBoxLayout* wrapIndent(QWidget* w, int leftIndent) {
+    auto* h = new QHBoxLayout();
+    h->setContentsMargins(leftIndent, 0, 0, 0);
+    h->setSpacing(0);
+    h->addWidget(w);
+    return h;
+}
+
+// ── 辅助：把 var key 翻译为带单位的中文标签 ──────────────────
+
+static QString varDisplayLabel(const QString& key) {
+    if (key == "acc_fsr")  return "加速度计 (g)";
+    if (key == "gyro_fsr") return "陀螺仪 (°/s)";
+    return key;
 }
 
 // ── UI 构建 ──────────────────────────────────────────────────
@@ -29,151 +75,181 @@ void ProtocolConfigPanel::buildUI()
 
     // 标题栏
     auto* titleBar = new QHBoxLayout();
-    titleBar->setContentsMargins(12, 8, 8, 8);
+    titleBar->setContentsMargins(14, 10, 8, 10);
+    titleBar->setSpacing(0);
+
     auto* titleLabel = new QLabel("协议配置", this);
     titleLabel->setObjectName("sectionTitle");
     titleBar->addWidget(titleLabel);
     titleBar->addStretch();
-    auto* closeBtn = new QPushButton("\u2715", this);
+
+    // 复用 FramelessWindow 顶栏的 1px 像素叉号绘制，确保 UI 风格统一
+    auto* closeBtn = new QPushButton(this);
+    closeBtn->setObjectName("closeBtn");
     closeBtn->setFixedSize(24, 24);
-    closeBtn->setStyleSheet(Styles::CONFIG_PANEL_CLOSE_BTN_STYLE());
+    closeBtn->setIcon(WindowIcons::makeCloseIcon());
+    closeBtn->setIconSize(QSize(16, 16));
     closeBtn->setCursor(Qt::PointingHandCursor);
     connect(closeBtn, &QPushButton::clicked, this, &ProtocolConfigPanel::closeRequested);
     titleBar->addWidget(closeBtn);
-    outerLayout->addLayout(titleBar);
 
-    // 分隔线
-    auto* sep1 = new QFrame(this);
-    sep1->setStyleSheet(Styles::CONFIG_PANEL_SEPARATOR_STYLE());
-    outerLayout->addWidget(sep1);
+    outerLayout->addLayout(titleBar);
+    outerLayout->addWidget(makeSeparator(this));
 
     // 滚动区域
     auto* scrollArea = new QScrollArea(this);
     scrollArea->setWidgetResizable(true);
     scrollArea->setFrameShape(QFrame::NoFrame);
-    scrollArea->setStyleSheet("QScrollArea { background: transparent; border: none; }");
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     auto* scrollContent = new QWidget();
+    scrollContent->setObjectName("configScrollContent");
+    scrollContent->setStyleSheet("QWidget#configScrollContent { background: transparent; }");
     auto* scrollLayout = new QVBoxLayout(scrollContent);
-    scrollLayout->setContentsMargins(12, 8, 12, 8);
-    scrollLayout->setSpacing(12);
+    scrollLayout->setContentsMargins(14, 14, 14, 14);
+    scrollLayout->setSpacing(14);
 
     buildProtocolSection(scrollLayout);
-
-    auto* sep2 = new QFrame(scrollContent);
-    sep2->setStyleSheet(Styles::CONFIG_PANEL_SEPARATOR_STYLE());
-    scrollLayout->addWidget(sep2);
-
+    scrollLayout->addWidget(makeSeparator(scrollContent));
     buildMappingSection(scrollLayout);
     scrollLayout->addStretch();
 
     scrollArea->setWidget(scrollContent);
     outerLayout->addWidget(scrollArea, 1);
 
-    // 底部分隔线
-    auto* sep3 = new QFrame(this);
-    sep3->setStyleSheet(Styles::CONFIG_PANEL_SEPARATOR_STYLE());
-    outerLayout->addWidget(sep3);
-
+    outerLayout->addWidget(makeSeparator(this));
     buildActionBar(outerLayout);
 }
 
 void ProtocolConfigPanel::buildProtocolSection(QVBoxLayout* container)
 {
-    // 协议选择
-    auto* protoLabel = new QLabel("协议", this);
-    container->addWidget(protoLabel);
+    // L1 段落标题
+    auto* header = new QLabel("协议定义", this);
+    header->setObjectName("sectionTitle");
+    container->addWidget(header);
 
-    m_protocolCombo = new QComboBox(this);
-    m_protocolCombo->setStyleSheet(Styles::STYLE_COMBO());
+    // L2：协议选择行（「协议」+ 下拉框）
+    auto* protoRow = new QHBoxLayout();
+    protoRow->setContentsMargins(INDENT_L2, 0, 0, 0);
+    protoRow->setSpacing(10);
+
+    auto* protoLabel = new QLabel("协议", this);
+    protoLabel->setFixedWidth(44);
+    protoLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    protoRow->addWidget(protoLabel, 0, Qt::AlignVCenter);
+
+    m_protocolCombo = new FocusComboBox(this);
+    m_protocolCombo->setFixedHeight(INPUT_HEIGHT);
+    m_protocolCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     connect(m_protocolCombo, qOverload<int>(&QComboBox::currentIndexChanged),
             this, &ProtocolConfigPanel::onProtocolChanged);
-    container->addWidget(m_protocolCombo);
+    protoRow->addWidget(m_protocolCombo, 1, Qt::AlignVCenter);
+    container->addLayout(protoRow);
 
-    // 描述
+    // L2：描述文字
     m_descLabel = new QLabel(this);
     m_descLabel->setObjectName("descLabel");
     m_descLabel->setWordWrap(true);
-    container->addWidget(m_descLabel);
+    container->addLayout(wrapIndent(m_descLabel, INDENT_L2));
 
-    // 字段列表
+    // L2：字段小标题
     auto* fieldsTitle = new QLabel("字段", this);
-    container->addWidget(fieldsTitle);
+    fieldsTitle->setObjectName("subLabel");
+    fieldsTitle->setContentsMargins(0, 4, 0, 0);
+    container->addLayout(wrapIndent(fieldsTitle, INDENT_L2));
 
+    // L3：字段列表（带边框背景，需通过 HBox 包裹实现缩进）
     m_fieldListLabel = new QLabel(this);
     m_fieldListLabel->setObjectName("fieldListLabel");
     m_fieldListLabel->setWordWrap(true);
-    container->addWidget(m_fieldListLabel);
+    m_fieldListLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    container->addLayout(wrapIndent(m_fieldListLabel, INDENT_L3));
 
-    // 变量编辑区
-    auto* varsTitle = new QLabel("变量", this);
-    container->addWidget(varsTitle);
+    // L2：量程小标题
+    auto* varsTitle = new QLabel("量程", this);
+    varsTitle->setObjectName("subLabel");
+    varsTitle->setContentsMargins(0, 4, 0, 0);
+    container->addLayout(wrapIndent(varsTitle, INDENT_L2));
 
+    // L3：量程参数编辑表单
     m_varsLayout = new QFormLayout();
-    m_varsLayout->setContentsMargins(0, 0, 0, 0);
+    m_varsLayout->setContentsMargins(INDENT_L3, 0, 0, 0);
     m_varsLayout->setSpacing(6);
-    m_varsLayout->setLabelAlignment(Qt::AlignRight);
+    m_varsLayout->setHorizontalSpacing(12);
+    m_varsLayout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    m_varsLayout->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
+    // 字段列允许扩展，使内部"右贴齐"包装器能将数值框推到右侧
+    m_varsLayout->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
     container->addLayout(m_varsLayout);
 }
 
 void ProtocolConfigPanel::buildMappingSection(QVBoxLayout* container)
 {
+    // L1 段落标题
     auto* title = new QLabel("字段映射", this);
     title->setObjectName("sectionTitle");
     container->addWidget(title);
 
     struct PurposeDef {
         QString purpose;
-        QString displayName;
+        QString shortName;     // 大写简称
         QStringList axes;
     };
 
     const QList<PurposeDef> defs = {
-        { PointPurpose::Accelerometer, "加速度计", {"X", "Y", "Z"} },
-        { PointPurpose::Gyroscope,     "陀螺仪",   {"X", "Y", "Z"} },
-        { PointPurpose::Quaternion,    "四元数",   {"W", "X", "Y", "Z"} },
-        { PointPurpose::MagneticField, "磁力计",   {"X", "Y", "Z"} },
-        { PointPurpose::Barometer,     "气压计",   {"altitude", "pressure"} },
+        { PointPurpose::Accelerometer, "ACC",  {"X", "Y", "Z"} },
+        { PointPurpose::Gyroscope,     "GYR",  {"X", "Y", "Z"} },
+        { PointPurpose::Quaternion,    "QUAT", {"W", "X", "Y", "Z"} },
+        { PointPurpose::MagneticField, "MAG",  {"X", "Y", "Z"} },
+        { PointPurpose::Barometer,     "BARO", {"altitude", "pressure"} },
     };
 
     for (const auto& def : defs) {
         PurposeGroup group;
         group.purpose     = def.purpose;
-        group.displayName = def.displayName;
+        group.displayName = def.shortName;
 
-        auto* groupLabel = new QLabel(
-            QString("%1 (%2)").arg(def.displayName, def.purpose), this);
-        groupLabel->setStyleSheet("color: #b0b0b0; font-size: 12px; padding-top: 4px;");
-        container->addWidget(groupLabel);
+        // L2：传感器分组短名（ACC / GYR / ...）
+        auto* groupLabel = new QLabel(def.shortName, this);
+        groupLabel->setObjectName("groupLabel");
+        container->addLayout(wrapIndent(groupLabel, INDENT_L2));
 
+        // L3：该传感器的轴映射表单
         auto* grid = new QFormLayout();
-        grid->setContentsMargins(8, 0, 0, 0);
-        grid->setSpacing(4);
-        grid->setLabelAlignment(Qt::AlignRight);
+        grid->setContentsMargins(INDENT_L3, 2, 0, 6);
+        grid->setSpacing(6);
+        grid->setHorizontalSpacing(10);
+        grid->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        grid->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
+        grid->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
         for (const QString& axis : def.axes) {
             MappingRow row;
             row.axisLabel = axis;
 
             auto* rowLayout = new QHBoxLayout();
-            rowLayout->setSpacing(4);
+            rowLayout->setSpacing(6);
+            rowLayout->setContentsMargins(0, 0, 0, 0);
 
-            row.fieldCombo = new QComboBox(this);
-            row.fieldCombo->setStyleSheet(Styles::STYLE_COMBO());
-            row.fieldCombo->setMinimumWidth(120);
-            rowLayout->addWidget(row.fieldCombo, 1);
+            row.fieldCombo = new FocusComboBox(this);
+            row.fieldCombo->setFixedHeight(INPUT_HEIGHT);
+            row.fieldCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+            rowLayout->addWidget(row.fieldCombo, 1, Qt::AlignVCenter);
 
             auto* multLabel = new QLabel("\u00d7", this);
-            multLabel->setStyleSheet("color: #888888; font-size: 11px; border: none;");
-            rowLayout->addWidget(multLabel);
+            multLabel->setObjectName("multSign");
+            rowLayout->addWidget(multLabel, 0, Qt::AlignVCenter);
 
-            row.multSpin = new QDoubleSpinBox(this);
-            row.multSpin->setStyleSheet(Styles::STYLE_SPINBOX());
+            row.multSpin = new FocusSpinBox(this);
             row.multSpin->setRange(-1e6, 1e6);
-            row.multSpin->setDecimals(4);
+            row.multSpin->setDecimals(2);
             row.multSpin->setValue(1.0);
-            row.multSpin->setFixedWidth(80);
-            rowLayout->addWidget(row.multSpin);
+            row.multSpin->setFixedWidth(SPIN_WIDTH);
+            row.multSpin->setFixedHeight(INPUT_HEIGHT);
+            row.multSpin->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+            row.multSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+            row.multSpin->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            rowLayout->addWidget(row.multSpin, 0, Qt::AlignVCenter);
 
             grid->addRow(axis, rowLayout);
             group.rows.append(row);
@@ -187,16 +263,16 @@ void ProtocolConfigPanel::buildMappingSection(QVBoxLayout* container)
 void ProtocolConfigPanel::buildActionBar(QVBoxLayout* container)
 {
     auto* actionLayout = new QHBoxLayout();
-    actionLayout->setContentsMargins(12, 8, 12, 8);
+    actionLayout->setContentsMargins(14, 10, 14, 10);
     actionLayout->setSpacing(8);
 
     auto* resetBtn = new QPushButton("重置", this);
-    resetBtn->setStyleSheet(Styles::STYLE_BTN_IDLE());
+    resetBtn->setObjectName("resetBtn");
     resetBtn->setCursor(Qt::PointingHandCursor);
     connect(resetBtn, &QPushButton::clicked, this, &ProtocolConfigPanel::onReset);
 
     auto* applyBtn = new QPushButton("应用", this);
-    applyBtn->setStyleSheet(Styles::STYLE_BTN_ACTIVE());
+    applyBtn->setObjectName("applyBtn");
     applyBtn->setCursor(Qt::PointingHandCursor);
     connect(applyBtn, &QPushButton::clicked, this, &ProtocolConfigPanel::onApply);
 
@@ -232,27 +308,42 @@ void ProtocolConfigPanel::onProtocolChanged(int index)
     autoMatchFields(fields);
 }
 
+void ProtocolConfigPanel::clearVarsLayout()
+{
+    // 注意：QLayout 本身就继承自 QLayoutItem，所以对 layout 行
+    // takeAt 返回的指针 == item->layout()。不能再额外 delete item，
+    // 否则会触发 double-free 导致崩溃。
+    while (m_varsLayout->count() > 0) {
+        QLayoutItem* item = m_varsLayout->takeAt(0);
+        if (!item) break;
+
+        if (QWidget* w = item->widget()) {
+            w->deleteLater();
+            delete item;                       // QWidgetItem 包装器
+        } else if (QLayout* sub = item->layout()) {
+            // 递归清理一层（spinWrap 内部只有 stretch + 单个 spin）
+            while (sub->count() > 0) {
+                QLayoutItem* ci = sub->takeAt(0);
+                if (!ci) break;
+                if (QWidget* cw = ci->widget())
+                    cw->deleteLater();
+                delete ci;                      // 安全：spacer / 包装器
+            }
+            delete sub;                         // item 与 sub 同一指针，仅删一次
+        } else {
+            delete item;                        // spacer 等其他类型
+        }
+    }
+    m_varSpins.clear();
+}
+
 void ProtocolConfigPanel::refreshProtocolInfo(const QJsonObject& protoDef)
 {
+    clearVarsLayout();
+
     if (protoDef.isEmpty()) {
         m_descLabel->setText("CSV 文本协议（无二进制帧定义）");
         m_fieldListLabel->setText("—");
-
-        // 清除变量编辑器
-        while (m_varsLayout->count() > 0) {
-            auto* item = m_varsLayout->takeAt(0);
-            if (item->widget()) item->widget()->deleteLater();
-            if (item->layout()) {
-                while (item->layout()->count() > 0) {
-                    auto* sub = item->layout()->takeAt(0);
-                    if (sub->widget()) sub->widget()->deleteLater();
-                    delete sub;
-                }
-                delete item->layout();
-            }
-            delete item;
-        }
-        m_varSpins.clear();
         return;
     }
 
@@ -264,45 +355,36 @@ void ProtocolConfigPanel::refreshProtocolInfo(const QJsonObject& protoDef)
         fieldNames.append(v.toString());
     m_fieldListLabel->setText(fieldNames.join(", "));
 
-    // 重建变量编辑器
-    while (m_varsLayout->count() > 0) {
-        auto* item = m_varsLayout->takeAt(0);
-        if (item->widget()) item->widget()->deleteLater();
-        if (item->layout()) {
-            while (item->layout()->count() > 0) {
-                auto* sub = item->layout()->takeAt(0);
-                if (sub->widget()) sub->widget()->deleteLater();
-                delete sub;
-            }
-            delete item->layout();
-        }
-        delete item;
-    }
-    m_varSpins.clear();
-
     QJsonObject varsObj = protoDef.value("variables").toObject();
-    QJsonObject serialObj = ConfigLoader::instance().getProtocolDef()
-                                .value("variables").toObject();
+    SerialConfig sc = ConfigLoader::instance().getSerialConfig();
 
     for (auto it = varsObj.begin(); it != varsObj.end(); ++it) {
-        auto* spin = new QDoubleSpinBox(this);
-        spin->setStyleSheet(Styles::STYLE_SPINBOX());
+        auto* spin = new FocusSpinBox(this);
         spin->setRange(-1e9, 1e9);
         spin->setDecimals(2);
+        spin->setFixedWidth(VAR_SPIN_WIDTH);
+        spin->setFixedHeight(INPUT_HEIGHT);
+        spin->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        spin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+        spin->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
-        // 优先使用 config.json serial 节中的覆盖值
-        QJsonObject serial = ConfigLoader::instance().getSerialConfig().protocol ==
-            m_protocolCombo->currentData().toString()
-            ? QJsonObject() : QJsonObject();
-        SerialConfig sc = ConfigLoader::instance().getSerialConfig();
-        if (it.key() == "acc_fsr")
+        // 当预览协议与当前活跃协议一致时，优先从 serial 节读取覆盖值
+        bool sameProto = (sc.protocol == m_protocolCombo->currentData().toString());
+        if (sameProto && it.key() == "acc_fsr")
             spin->setValue(sc.accFsr);
-        else if (it.key() == "gyro_fsr")
+        else if (sameProto && it.key() == "gyro_fsr")
             spin->setValue(sc.gyroFsr);
         else
             spin->setValue(it.value().toDouble());
 
-        m_varsLayout->addRow(it.key(), spin);
+        // 用 HBox 包装：左侧 stretch 把 spin 推到表单字段列的右端
+        auto* spinWrap = new QHBoxLayout();
+        spinWrap->setContentsMargins(0, 0, 0, 0);
+        spinWrap->setSpacing(0);
+        spinWrap->addStretch();
+        spinWrap->addWidget(spin, 0, Qt::AlignVCenter);
+
+        m_varsLayout->addRow(varDisplayLabel(it.key()), spinWrap);
         m_varSpins[it.key()] = spin;
     }
 }
@@ -314,11 +396,10 @@ void ProtocolConfigPanel::refreshFieldCombos(const QStringList& fieldNames)
             QString currentText = row.fieldCombo->currentData().toString();
             row.fieldCombo->blockSignals(true);
             row.fieldCombo->clear();
-            row.fieldCombo->addItem("(无)", QString());
+            row.fieldCombo->addItem("(未绑定)", QString());
             for (const QString& f : fieldNames)
                 row.fieldCombo->addItem(f, f);
 
-            // 恢复先前选择
             int idx = row.fieldCombo->findData(currentText);
             if (idx >= 0)
                 row.fieldCombo->setCurrentIndex(idx);
@@ -330,7 +411,6 @@ void ProtocolConfigPanel::refreshFieldCombos(const QStringList& fieldNames)
 
 void ProtocolConfigPanel::autoMatchFields(const QStringList& fieldNames)
 {
-    // 默认的自动匹配规则
     struct AutoMatch { QString purpose; QString axis; QString fieldHint; };
     const QList<AutoMatch> rules = {
         { PointPurpose::Accelerometer, "X", "ax" },
@@ -369,7 +449,6 @@ void ProtocolConfigPanel::autoMatchFields(const QStringList& fieldNames)
 
 void ProtocolConfigPanel::loadFromConfig()
 {
-    // 填充协议下拉框
     m_protocolCombo->blockSignals(true);
     m_protocolCombo->clear();
     m_protocolCombo->addItem("csv (文本)", "csv");
@@ -377,17 +456,13 @@ void ProtocolConfigPanel::loadFromConfig()
     for (const QString& name : protocols)
         m_protocolCombo->addItem(name, name);
 
-    // 选中当前活跃协议
     SerialConfig sc = ConfigLoader::instance().getSerialConfig();
     int idx = m_protocolCombo->findData(sc.protocol);
     if (idx >= 0)
         m_protocolCombo->setCurrentIndex(idx);
     m_protocolCombo->blockSignals(false);
 
-    // 手动触发一次协议切换以加载预览
     onProtocolChanged(m_protocolCombo->currentIndex());
-
-    // 从 config 加载现有映射
     loadMappingsFromConfig();
 }
 
@@ -414,7 +489,6 @@ void ProtocolConfigPanel::loadMappingsFromConfig()
 
             if (!mapping) continue;
 
-            // 尝试用 field 名匹配
             if (!mapping->field.isEmpty()) {
                 int idx = row.fieldCombo->findData(mapping->field);
                 if (idx >= 0)
@@ -431,7 +505,6 @@ QList<PointConfig> ProtocolConfigPanel::collectSensorPoints() const
 {
     QList<PointConfig> result;
 
-    // 为 purpose → name 提供默认名称映射
     static const QMap<QString, QString> defaultNames = {
         { PointPurpose::Accelerometer, "ACC" },
         { PointPurpose::Gyroscope,     "GYR" },
@@ -441,7 +514,6 @@ QList<PointConfig> ProtocolConfigPanel::collectSensorPoints() const
     };
 
     for (const auto& group : m_purposeGroups) {
-        // 检查此 group 是否有任何字段被映射
         bool hasAnyMapping = false;
         for (const auto& row : group.rows) {
             if (!row.fieldCombo->currentData().toString().isEmpty()) {

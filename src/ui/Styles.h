@@ -46,60 +46,83 @@ inline QString STYLE_LABEL() {
            " font-family: 'Microsoft YaHei', sans-serif; border: none;";
 }
 
-// ── 下拉框样式 ────────────────────────────────────────────────
+// ── 下拉框样式（可剥离复用）──────────────────────────────────
 
-// 串口选择下拉框样式
-inline QString STYLE_COMBO() {
-    return R"(
-QComboBox {
+// 下拉框核心 QSS —— 传入 prefix 可将规则作用域化；空 prefix 作用于全局
+// 用法示例：
+//   STYLE_COMBO_QSS("")                            → 全局 QComboBox
+//   STYLE_COMBO_QSS("QWidget#configPanel")         → 限定于面板内部
+inline QString STYLE_COMBO_QSS(const QString& prefix = QString()) {
+    QString css = R"(
+@ QComboBox {
     color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
     background: #2b2d30;
     border: 1px solid #4d4d4d; border-radius: 6px;
-    padding: 2px 20px 2px 8px; min-width: 120px;
+    padding: 1px 20px 1px 8px; min-height: 14px;
 }
-QComboBox:hover { border-color: #666666; background: #333538; }
-QComboBox:disabled { color: #666666; border-color: #333333; background: #2a2a2a; }
-QComboBox::drop-down {
+@ QComboBox:hover { border-color: #666666; background: #333538; }
+@ QComboBox:focus { border-color: #0e639c; background: #333538; }
+@ QComboBox:disabled { color: #666666; border-color: #333333; background: #2a2a2a; }
+@ QComboBox::drop-down {
     subcontrol-origin: padding; subcontrol-position: center right;
     width: 20px; border: none; background: transparent;
 }
-QComboBox::down-arrow {
+@ QComboBox::down-arrow {
     image: url(:/svg/icons/ChevronDown.svg);
     width: 14px; height: 14px;
     margin-right: 6px;
 }
-QComboBox::down-arrow:on {
+@ QComboBox::down-arrow:on {
     image: url(:/svg/icons/ChevronUp.svg);
 }
-QComboBox QAbstractItemView {
+@ QComboBox QAbstractItemView {
     color: #e0e0e0; background-color: #2b2d30;
     selection-background-color: #2c3e50;
     font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
     border: 1px solid #4d4d4d; border-radius: 6px;
     outline: none; margin: 0px; padding: 4px;
 }
-QComboBox QAbstractItemView::item {
-    min-height: 24px; padding: 0px 8px; border-radius: 4px;
+@ QComboBox QAbstractItemView::item {
+    min-height: 24px; max-height: 24px;
+    padding: 0px 8px; border-radius: 4px;
 }
-QComboBox QAbstractItemView::item:hover { background-color: #3a3d41; }
-QComboBox QAbstractItemView::item:selected { background-color: #2c3e50; }
+@ QComboBox QAbstractItemView::item:hover { background-color: #3a3d41; }
+@ QComboBox QAbstractItemView::item:selected { background-color: #2c3e50; }
 )";
+    const QString scope = prefix.isEmpty() ? QString() : (prefix + " ");
+    return css.replace("@ ", scope);
 }
 
-// ── 数字输入框样式 ────────────────────────────────────────────
+// 全局默认下拉框样式（保持现有 min-width: 120px 行为）
+inline QString STYLE_COMBO() {
+    return STYLE_COMBO_QSS() + "\nQComboBox { min-width: 120px; }\n";
+}
 
-// QSpinBox 样式（无上下箭头）
-inline QString STYLE_SPINBOX() {
-    return R"(
-QSpinBox {
+// ── 数字输入框样式（可剥离复用，与下拉框等高同色）──────────────
+
+// SpinBox 核心 QSS —— 同样支持 prefix 作用域化
+inline QString STYLE_SPINBOX_QSS(const QString& prefix = QString()) {
+    QString css = R"(
+@ QSpinBox, @ QDoubleSpinBox {
     color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
-    background: #333333; border: 1px solid #4d4d4d;
-    border-radius: 6px; padding: 2px 6px;
+    background: #2b2d30; border: 1px solid #4d4d4d;
+    border-radius: 6px; padding: 1px 8px; min-height: 14px;
 }
-QSpinBox:hover { border-color: #666666; background: #3a3a3a; }
-QSpinBox:disabled { color: #666666; border-color: #333333; background: #2a2a2a; }
-QSpinBox::up-button, QSpinBox::down-button { width: 0; height: 0; border: none; }
+@ QSpinBox:hover, @ QDoubleSpinBox:hover { border-color: #666666; background: #333538; }
+@ QSpinBox:focus, @ QDoubleSpinBox:focus { border-color: #0e639c; background: #333538; }
+@ QSpinBox:disabled, @ QDoubleSpinBox:disabled { color: #666666; border-color: #333333; background: #2a2a2a; }
+@ QSpinBox::up-button, @ QSpinBox::down-button,
+@ QDoubleSpinBox::up-button, @ QDoubleSpinBox::down-button {
+    width: 0; height: 0; border: none; background: transparent;
+}
 )";
+    const QString scope = prefix.isEmpty() ? QString() : (prefix + " ");
+    return css.replace("@ ", scope);
+}
+
+// 全局默认数值输入框样式
+inline QString STYLE_SPINBOX() {
+    return STYLE_SPINBOX_QSS();
 }
 
 // ── 按钮样式 ─────────────────────────────────────────────────
@@ -329,42 +352,109 @@ QWidget#configPanel {
     background-color: #252526;
     border-right: 1px solid #333333;
 }
+
+/* ── 标签 ── */
 QWidget#configPanel QLabel {
     color: #cccccc;
     font-size: 12px;
     font-family: 'Microsoft YaHei', sans-serif;
     border: none;
+    background: transparent;
 }
 QWidget#configPanel QLabel#sectionTitle {
     color: #e0e0e0;
     font-size: 13px;
     font-weight: bold;
-    padding: 4px 0px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+QWidget#configPanel QLabel#subLabel {
+    color: #b8b8b8;
+    font-size: 12px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+QWidget#configPanel QLabel#groupLabel {
+    color: #c8c8c8;
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    padding-top: 6px;
+    padding-bottom: 2px;
 }
 QWidget#configPanel QLabel#descLabel {
-    color: #999999;
+    color: #888888;
     font-size: 11px;
 }
 QWidget#configPanel QLabel#fieldListLabel {
-    color: #aaaaaa;
+    color: #9fa0a0;
     font-size: 11px;
     font-family: Consolas, monospace;
+    background: #1e1e1e;
+    border: 1px solid #333333;
+    border-radius: 4px;
+    padding: 6px 8px;
 }
-)";
+QWidget#configPanel QLabel#multSign {
+    color: #777777;
+    font-size: 11px;
+    padding: 0px 2px;
 }
 
-inline QString CONFIG_PANEL_SEPARATOR_STYLE() {
-    return "background-color: #333333; min-height: 1px; max-height: 1px;";
+/* ── 按钮 ── */
+QWidget#configPanel QPushButton {
+    color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
+    background: #333333; border: 1px solid #4d4d4d;
+    border-radius: 4px; padding: 4px 14px;
+    min-height: 20px;
 }
+QWidget#configPanel QPushButton:hover { background-color: #404040; border-color: #666666; }
+QWidget#configPanel QPushButton:pressed { background-color: #2a2a2a; border-color: #4d4d4d; }
+QWidget#configPanel QPushButton#applyBtn {
+    color: #ffffff; background-color: #2e7d32; border: 1px solid #4caf50;
+}
+QWidget#configPanel QPushButton#applyBtn:hover { background-color: #388e3c; }
+QWidget#configPanel QPushButton#applyBtn:pressed { background-color: #1b5e20; }
+QWidget#configPanel QPushButton#closeBtn {
+    background: transparent; border: none;
+    border-radius: 4px; padding: 0px;
+    min-width: 0px; min-height: 0px;
+}
+QWidget#configPanel QPushButton#closeBtn:hover { background: #E81123; }
+QWidget#configPanel QPushButton#closeBtn:pressed { background: #c50f1f; }
 
-inline QString CONFIG_PANEL_CLOSE_BTN_STYLE() {
-    return R"(
-QPushButton {
-    color: #999999; background: transparent; border: none;
-    border-radius: 4px; font-size: 14px; padding: 2px 6px;
+/* ── 滚动区与滚动条 ── */
+QWidget#configPanel QScrollArea {
+    background: transparent; border: none;
 }
-QPushButton:hover { color: #ffffff; background: #333333; }
-QPushButton:pressed { background: #1e1e1e; }
+QWidget#configPanel QScrollBar:vertical {
+    border: none; background: transparent; width: 8px; margin: 0;
+}
+QWidget#configPanel QScrollBar::handle:vertical {
+    background: #3f3f3f; min-height: 24px; border-radius: 4px;
+}
+QWidget#configPanel QScrollBar::handle:vertical:hover { background: #555555; }
+QWidget#configPanel QScrollBar::add-line:vertical,
+QWidget#configPanel QScrollBar::sub-line:vertical { height: 0; border: none; background: transparent; }
+QWidget#configPanel QScrollBar::add-page:vertical,
+QWidget#configPanel QScrollBar::sub-page:vertical { background: transparent; }
+
+/* ── 分隔线 ── */
+QFrame#configSep { background-color: #333333; min-height: 1px; max-height: 1px; border: none; }
+)"
+    // 复用顶栏剥离出的下拉框/数值框样式，scope 到面板内部
+    + STYLE_COMBO_QSS("QWidget#configPanel")
+    + STYLE_SPINBOX_QSS("QWidget#configPanel")
+    // 面板专属覆盖：用相同的 min/max-height 锁死内容区，确保下拉框与
+    // 数值框在面板内严格等高（消除 QStyle 对二者 frame margin 的细微差异）
+    + R"(
+QWidget#configPanel QComboBox,
+QWidget#configPanel QDoubleSpinBox,
+QWidget#configPanel QSpinBox {
+    min-height: 20px; max-height: 20px;
+    padding-top: 1px; padding-bottom: 1px;
+}
+QWidget#configPanel QComboBox::drop-down { height: 16px; }
 )";
 }
 

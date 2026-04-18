@@ -1,105 +1,163 @@
 {
-    "gravity_reference": 9.80,
-    "udp": {
-        "enabled": true,
-        "ip": "127.0.0.1",
-        "port": 8888
-    },
-    "serial": {
-        "enabled": true,
-        "port": "COM5",
-        "baudrate": 115200,
-        "timeout": 1,
-        "protocol": "atkms901m",
-        "acc_fsr": 4,
-        "gyro_fsr": 2000
-    },
-    "render_debug": {
-        "enabled": true,
-        "verbose_point_updates": false
-    },
+    "gravity_reference": 9.8,
     "ins": {
+        "baro_lpf_alpha": 0.1,
+        "filter_yaw_offset_deg": 90,
         "kalman": {
             "enabled": true,
-            "process_noise_sigma": 0.5,
-            "measurement_noise_R": 0.5
+            "measurement_noise_R": 0.5,
+            "process_noise_sigma": 0.5
         },
-        "zupt": {
-            "enabled": true,
-            "acc_variance_threshold": 0.5,
-            "gyro_variance_threshold": 0.1,
-            "window_size": 40
-        },
-        "baro_lpf_alpha": 0.1,
         "madgwick": {
             "beta": 0.05
         },
         "mahony": {
-            "kp": 1.0,
-            "ki": 0.0
+            "ki": 0,
+            "kp": 1
         },
-        "filter_yaw_offset_deg": 90.0
+        "zupt": {
+            "acc_variance_threshold": 0.5,
+            "enabled": true,
+            "gyro_variance_threshold": 0.1,
+            "window_size": 40
+        }
     },
     "points": [
         {
-            "name": "ACC",
-            "source": "any",
-            "purpose": "accelerometer",
-            "x": { "field": "ax" },
-            "y": { "field": "ay" },
-            "z": { "field": "az" }
-        },
-        {
-            "name": "GYR",
-            "source": "any",
-            "purpose": "gyroscope",
-            "x": { "field": "gx" },
-            "y": { "field": "gy" },
-            "z": { "field": "gz" }
-        },
-        {
-            "name": "QUAT",
-            "source": "any",
-            "purpose": "quaternion",
-            "w": { "field": "q0" },
-            "x": { "field": "q1" },
-            "y": { "field": "q2" },
-            "z": { "field": "q3" }
+            "altitude": {
+                "field": "altitude"
+            },
+            "name": "BARO",
+            "pressure": {
+                "field": "pressure"
+            },
+            "purpose": "barometer",
+            "source": "any"
         },
         {
             "name": "MAG",
-            "source": "any",
             "purpose": "magnetic_field",
-            "x": { "field": "mx" },
-            "y": { "field": "my" },
-            "z": { "field": "mz" }
-        },
-        {
-            "name": "BARO",
             "source": "any",
-            "purpose": "barometer",
-            "altitude": { "field": "altitude" },
-            "pressure": { "field": "pressure" }
+            "x": {
+                "field": "mx"
+            },
+            "y": {
+                "field": "my"
+            },
+            "z": {
+                "field": "mz"
+            }
         },
         {
+            "name": "QUAT",
+            "purpose": "quaternion",
+            "source": "any",
+            "w": {
+                "field": "q0"
+            },
+            "x": {
+                "field": "q1"
+            },
+            "y": {
+                "field": "q2"
+            },
+            "z": {
+                "field": "q3"
+            }
+        },
+        {
+            "name": "GYR",
+            "purpose": "gyroscope",
+            "source": "any",
+            "x": {
+                "field": "gx"
+            },
+            "y": {
+                "field": "gy"
+            },
+            "z": {
+                "field": "gz"
+            }
+        },
+        {
+            "name": "ACC",
+            "purpose": "accelerometer",
+            "source": "any",
+            "x": {
+                "field": "ax"
+            },
+            "y": {
+                "field": "ay"
+            },
+            "z": {
+                "field": "az"
+            }
+        },
+        {
+            "color": [
+                0,
+                0,
+                255,
+                255
+            ],
             "name": "Point G (Prefixed)",
-            "source": "udp",
             "prefix": "G",
-            "color": [0, 0, 255, 255],
             "size": 15,
-            "x": { "index": 0, "multiplier": 1.0 },
-            "y": { "index": 1, "multiplier": -1.0 },
-            "z": { "index": 2, "multiplier": -1.0 }
+            "source": "udp",
+            "x": {
+                "index": 0,
+                "multiplier": 1
+            },
+            "y": {
+                "index": 1,
+                "multiplier": -1
+            },
+            "z": {
+                "index": 2,
+                "multiplier": -1
+            }
         },
         {
+            "color": [
+                255,
+                0,
+                0,
+                255
+            ],
             "name": "Point H (Prefixed)",
-            "source": "udp",
             "prefix": "H",
-            "color": [255, 0, 0, 255],
             "size": 15,
-            "x": { "index": 3, "multiplier": 100.0 },
-            "y": { "index": 1, "multiplier": -100.0 },
-            "z": { "index": 2, "multiplier": -100.0 }
+            "source": "udp",
+            "x": {
+                "index": 3,
+                "multiplier": 100
+            },
+            "y": {
+                "index": 1,
+                "multiplier": -100
+            },
+            "z": {
+                "index": 2,
+                "multiplier": -100
+            }
         }
-    ]
+    ],
+    "render_debug": {
+        "enabled": true,
+        "verbose_point_updates": false
+    },
+    "serial": {
+        "acc_fsr": 4,
+        "baudrate": 115200,
+        "enabled": true,
+        "gyro_fsr": 2000,
+        "port": "COM5",
+        "protocol": "atkms901m",
+        "timeout": 1
+    },
+    "udp": {
+        "enabled": true,
+        "ip": "127.0.0.1",
+        "port": 8888
+    }
 }
