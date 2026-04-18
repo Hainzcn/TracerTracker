@@ -68,6 +68,11 @@ set(SOURCES
     resources/resources.qrc
 )
 
+# Windows 下将 app.ico 通过 .rc 嵌入 PE 资源段，Explorer/任务栏显示自定义图标
+if(WIN32)
+    list(APPEND SOURCES resources/icons/app.rc)
+endif()
+
 # 创建可执行文件
 add_executable(${PROJECT_NAME} ${SOURCES})
 

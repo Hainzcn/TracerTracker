@@ -1,0 +1,4 @@
+// Windows resource script: embeds app.ico into the executable
+// so Explorer / taskbar / Alt-Tab display the custom icon.
+// Compiled by rc.exe (MSVC) or windres (MinGW) via CMake on WIN32 builds.
+IDI_ICON1 ICON "app.ico"

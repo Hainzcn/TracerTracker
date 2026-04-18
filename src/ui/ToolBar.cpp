@@ -12,6 +12,8 @@
 #include <QFontMetrics>
 #include <QStyle>
 #include <QStyleOptionComboBox>
+#include <QIcon>
+#include <QPixmap>
 #include <algorithm>
 #ifdef HAVE_QT_SERIAL_PORT
 #  include <QSerialPortInfo>
@@ -25,7 +27,6 @@
 
 SeamlessComboBox::SeamlessComboBox(QWidget* parent) : QComboBox(parent) {}
 
-// 弹出列表齐平放在选框正下方，无重叠。
 void SeamlessComboBox::showPopup() {
     QComboBox::showPopup();
     QWidget* popup = view()->window();
@@ -33,7 +34,8 @@ void SeamlessComboBox::showPopup() {
         return;
 
     QRect geo = popup->geometry();
-    geo.moveTopLeft(mapToGlobal(QPoint(0, height())));
+    // 向下偏移 4px，产生悬浮感
+    geo.moveTopLeft(mapToGlobal(QPoint(0, height() + 4)));
     geo.setWidth(std::max(geo.width(), width()));
     popup->setGeometry(geo);
 }
@@ -63,6 +65,18 @@ ToolBar::ToolBar(QWidget* parent) : QWidget(parent) {
     layout->setSpacing(8);
 
     const int ctrlH = 24;
+
+    // ── 品牌标识（最左端）──
+    auto* logoLabel = new QLabel(this);
+    constexpr int kLogoSize = 16;  // 方形 PNG，宽高一致
+    logoLabel->setFixedSize(kLogoSize, kLogoSize);
+    const qreal dpr = logoLabel->devicePixelRatioF();
+    QPixmap logoPix = QIcon(":/icons/logo.png").pixmap(QSize(kLogoSize, kLogoSize) * dpr);
+    logoPix.setDevicePixelRatio(dpr);
+    logoLabel->setPixmap(logoPix);
+    logoLabel->setAlignment(Qt::AlignCenter);
+    layout->addWidget(logoLabel);
+    layout->addSpacing(8);
 
     // ── 串口区段 ──
     auto* serialLabel = new QLabel("串口 ");
@@ -145,8 +159,8 @@ void ToolBar::lockSerialComboSize() {
     if (!m_serialCombo || m_serialComboSizeLocked)
         return;
 
-    const int lockedHeight = std::max(m_serialCombo->height(), m_serialCombo->sizeHint().height());
-    m_serialCombo->setFixedSize(serialComboLockedWidth(), lockedHeight);
+    // 保持已设置的固定高度，仅锁定宽度
+    m_serialCombo->setFixedSize(serialComboLockedWidth(), m_serialCombo->height());
     m_serialComboSizeLocked = true;
 }
 

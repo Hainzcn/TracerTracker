@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QSurfaceFormat>
 #include <QFont>
+#include <QIcon>
 
 #include "ui/MainWindow.h"
 
@@ -24,6 +25,9 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("TracerTracker");
     app.setOrganizationName("TracerTracker");
+
+    // 窗口图标（任务栏 / Alt-Tab / 标题栏均使用此图标；.ico 多分辨率自动挑选）
+    app.setWindowIcon(QIcon(":/icons/app.ico"));
 
     // 全局默认字体（中文界面）
     QFont defaultFont("Microsoft YaHei", 10);

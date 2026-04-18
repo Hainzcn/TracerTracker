@@ -3,5 +3,9 @@
         <file>svg/icons/Menu.svg</file>
         <file>svg/icons/Cog.svg</file>
         <file>svg/icons/Settings.svg</file>
+        <file>svg/icons/ChevronDown.svg</file>
+        <file>svg/icons/ChevronUp.svg</file>
+        <file>icons/logo.png</file>
+        <file>icons/app.ico</file>
     </qresource>
 </RCC>

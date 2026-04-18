@@ -5,7 +5,6 @@
 #include <QSpinBox>
 #include <QHBoxLayout>
 #include <QSet>
-
 class QTimer;
 
 // ============================================================
@@ -14,7 +13,7 @@ class QTimer;
 // 及 UDP 端口/开关
 // ============================================================
 
-// 自定义 ComboBox：弹出列表齐平于选框底部，无重叠。
+// 自定义 ComboBox：弹出列表紧贴选框底部，无缝衔接。
 class SeamlessComboBox : public QComboBox {
     Q_OBJECT
 public:

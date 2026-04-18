@@ -53,40 +53,36 @@ inline QString STYLE_COMBO() {
     return R"(
 QComboBox {
     color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
-    background: #333333;
-    border: 1px solid #4d4d4d; border-radius: 4px;
+    background: #2b2d30;
+    border: 1px solid #4d4d4d; border-radius: 6px;
     padding: 2px 20px 2px 8px; min-width: 120px;
 }
-QComboBox:hover { border-color: #666666; background: #3a3a3a; }
+QComboBox:hover { border-color: #666666; background: #333538; }
 QComboBox:disabled { color: #666666; border-color: #333333; background: #2a2a2a; }
 QComboBox::drop-down {
     subcontrol-origin: padding; subcontrol-position: center right;
     width: 20px; border: none; background: transparent;
 }
 QComboBox::down-arrow {
-    image: none; width: 0px; height: 0px;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid #999999;
-    margin-right: 6px; margin-top: 2px;
+    image: url(:/svg/icons/ChevronDown.svg);
+    width: 14px; height: 14px;
+    margin-right: 6px;
 }
 QComboBox::down-arrow:on {
-    border-top: none; border-bottom: 5px solid #999999; margin-top: -2px;
+    image: url(:/svg/icons/ChevronUp.svg);
 }
 QComboBox QAbstractItemView {
-    color: #e0e0e0; background-color: #333333;
-    selection-background-color: #094771;
+    color: #e0e0e0; background-color: #2b2d30;
+    selection-background-color: #2c3e50;
     font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
-    border: 1px solid #4d4d4d; border-top: none;
-    border-top-left-radius: 0px; border-top-right-radius: 0px;
-    border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;
-    outline: none; margin: 0px; padding: 2px 0px 0px 0px;
+    border: 1px solid #4d4d4d; border-radius: 6px;
+    outline: none; margin: 0px; padding: 4px;
 }
 QComboBox QAbstractItemView::item {
-    min-height: 20px; padding: 0px 8px;
+    min-height: 24px; padding: 0px 8px; border-radius: 4px;
 }
-QComboBox QAbstractItemView::item:hover { background-color: #404040; }
-QComboBox QAbstractItemView::item:selected { background-color: #094771; }
+QComboBox QAbstractItemView::item:hover { background-color: #3a3d41; }
+QComboBox QAbstractItemView::item:selected { background-color: #2c3e50; }
 )";
 }
 
@@ -98,7 +94,7 @@ inline QString STYLE_SPINBOX() {
 QSpinBox {
     color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
     background: #333333; border: 1px solid #4d4d4d;
-    border-radius: 4px; padding: 2px 6px;
+    border-radius: 6px; padding: 2px 6px;
 }
 QSpinBox:hover { border-color: #666666; background: #3a3a3a; }
 QSpinBox:disabled { color: #666666; border-color: #333333; background: #2a2a2a; }
@@ -114,7 +110,7 @@ inline QString STYLE_BTN_IDLE() {
 QPushButton {
     color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
     background: #333333; border: 1px solid #4d4d4d;
-    border-radius: 4px; padding: 2px 10px;
+    border-radius: 6px; padding: 2px 10px;
 }
 QPushButton:hover { background-color: #404040; border-color: #666666; }
 QPushButton:pressed { background-color: #2a2a2a; border-color: #4d4d4d; }
@@ -128,7 +124,7 @@ inline QString STYLE_BTN_ACTIVE() {
 QPushButton {
     color: #ffffff; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
     background-color: #2e7d32; border: 1px solid #4caf50;
-    border-radius: 4px; padding: 2px 10px;
+    border-radius: 6px; padding: 2px 10px;
 }
 QPushButton:hover { background-color: #388e3c; }
 QPushButton:pressed { background-color: #1b5e20; }
