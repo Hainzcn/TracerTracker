@@ -2,52 +2,27 @@
 #include <QHostAddress>
 #include <QNetworkDatagram>
 #include <QDebug>
-#include <optional>
 
 // ============================================================
 // DataReceiver.cpp — 数据接收器实现
+//
+// 文本协议路径 → TextProtocolParser (csv / regex 由 framing.type 分派)
+// 二进制协议路径 → GenericFrameParser
 // ============================================================
-
-// ── CSV 解析辅助（UdpWorker & SerialWorker 共用）────────────────
-
-static std::optional<UdpWorker::ParseResult> parseCsvLineImpl(const QString& text) {
-    if (text.trimmed().isEmpty()) return std::nullopt;
-
-    QString prefix;
-    QString csvPart = text.trimmed();
-
-    int colonPos = csvPart.indexOf(':');
-    if (colonPos > 0 && colonPos < 16) {
-        QString prefixCandidate = csvPart.left(colonPos).trimmed();
-        if (!prefixCandidate.isEmpty()) {
-            prefix  = prefixCandidate;
-            csvPart = csvPart.mid(colonPos + 1).trimmed();
-        }
-    }
-
-    if (csvPart.isEmpty()) return std::nullopt;
-
-    QStringList parts = csvPart.split(',');
-    QList<double> values;
-    values.reserve(parts.size());
-    bool ok;
-    for (const QString& s : parts) {
-        double v = s.trimmed().toDouble(&ok);
-        if (!ok) return std::nullopt;
-        values.append(v);
-    }
-    if (values.isEmpty()) return std::nullopt;
-
-    return UdpWorker::ParseResult{prefix, values};
-}
 
 // ── UdpWorker ────────────────────────────────────────────────
 
 UdpWorker::UdpWorker(QObject* parent) : QObject(parent) {}
 
-void UdpWorker::startReceiving(const QString& ip, int port) {
+void UdpWorker::startReceiving(const QString& ip, int port,
+                                const QJsonObject& protocolDef) {
     m_running = true;
     m_socket  = new QUdpSocket(this);
+
+    m_textParser = TextProtocolParser::fromJson(protocolDef);
+    if (!m_textParser.isValid()) {
+        qWarning() << "UdpWorker: 文本协议定义无效，UDP 解析将输出空快照";
+    }
 
     if (!m_socket->bind(QHostAddress(ip), static_cast<quint16>(port))) {
         qWarning() << "UdpWorker: 绑定失败" << ip << ":" << port
@@ -57,7 +32,9 @@ void UdpWorker::startReceiving(const QString& ip, int port) {
     }
 
     connect(m_socket, &QUdpSocket::readyRead, this, &UdpWorker::onReadyRead);
-    qDebug() << "UdpWorker: 开始接收 UDP" << ip << ":" << port;
+    qDebug() << "UdpWorker: 开始接收 UDP" << ip << ":" << port
+             << "协议:" << protocolDef.value("name").toString()
+             << "(" << m_textParser.kind() << ")";
 }
 
 void UdpWorker::stopReceiving() {
@@ -67,6 +44,7 @@ void UdpWorker::stopReceiving() {
         m_socket->deleteLater();
         m_socket = nullptr;
     }
+    m_textParser.reset();
     qDebug() << "UdpWorker: 已停止";
 }
 
@@ -77,14 +55,19 @@ void UdpWorker::onReadyRead() {
         QNetworkDatagram datagram = m_socket->receiveDatagram();
         QByteArray data = datagram.data();
 
-        QString rawText = QString::fromUtf8(data).trimmed();
-        if (!rawText.isEmpty()) {
-            emit rawDataReceived("udp", rawText);
+        QString rawText = QString::fromUtf8(data);
+        const QString trimmed = rawText.trimmed();
+        if (!trimmed.isEmpty()) {
+            emit rawDataReceived("udp", trimmed);
         }
 
-        auto result = parseCsvLineImpl(rawText);
-        if (result.has_value()) {
-            emit dataReceived("udp", result->prefix, result->values);
+        if (!m_textParser.isValid()) continue;
+
+        // UDP 每个 datagram 可能含多行：追加一个换行确保 feed 至少切出一行
+        if (!rawText.endsWith('\n')) rawText.append('\n');
+        const auto results = m_textParser.feed(rawText);
+        for (const auto& r : results) {
+            emit dataReceived("udp", r.prefix, r.snapshot);
         }
     }
 }
@@ -93,9 +76,20 @@ void UdpWorker::onReadyRead() {
 
 SerialWorker::SerialWorker(QObject* parent) : QObject(parent) {}
 
-void SerialWorker::startCsv(const QString& port, int baudrate) {
+void SerialWorker::startText(const QString& port, int baudrate,
+                              const QJsonObject& protocolDef) {
 #ifdef HAVE_QT_SERIAL_PORT
     m_running  = true;
+    m_textMode = true;
+    m_textParser = TextProtocolParser::fromJson(protocolDef);
+
+    if (!m_textParser.isValid()) {
+        qWarning() << "SerialWorker: 文本协议定义无效，无法启动";
+        m_running = false;
+        emit serialStopped();
+        return;
+    }
+
     m_serial   = new QSerialPort(this);
     m_serial->setPortName(port);
     m_serial->setBaudRate(static_cast<QSerialPort::BaudRate>(baudrate));
@@ -111,7 +105,7 @@ void SerialWorker::startCsv(const QString& port, int baudrate) {
         return;
     }
 
-    connect(m_serial, &QSerialPort::readyRead, this, &SerialWorker::onCsvReadyRead);
+    connect(m_serial, &QSerialPort::readyRead, this, &SerialWorker::onTextReadyRead);
     connect(m_serial, &QSerialPort::errorOccurred, this, [this](QSerialPort::SerialPortError err) {
         if (err != QSerialPort::NoError && m_running) {
             qWarning() << "SerialWorker: 串口错误:" << err;
@@ -120,9 +114,11 @@ void SerialWorker::startCsv(const QString& port, int baudrate) {
         }
     });
 
-    qDebug() << "SerialWorker: CSV 串口已打开" << port << baudrate;
+    qDebug() << "SerialWorker: 文本协议串口已打开" << port << baudrate
+             << "协议:" << protocolDef.value("name").toString()
+             << "(" << m_textParser.kind() << ")";
 #else
-    Q_UNUSED(port); Q_UNUSED(baudrate);
+    Q_UNUSED(port); Q_UNUSED(baudrate); Q_UNUSED(protocolDef);
     qWarning() << "SerialWorker: Qt6SerialPort 未安装，串口功能不可用";
     emit serialStopped();
 #endif
@@ -132,7 +128,8 @@ void SerialWorker::startProtocol(const QString& port, int baudrate,
                                   const QJsonObject& protocolDef,
                                   const QVariantMap& variableOverrides) {
 #ifdef HAVE_QT_SERIAL_PORT
-    m_running = true;
+    m_running  = true;
+    m_textMode = false;
     m_genericParser = GenericFrameParser::fromJson(protocolDef, variableOverrides);
 
     if (!m_genericParser.isValid()) {
@@ -166,7 +163,7 @@ void SerialWorker::startProtocol(const QString& port, int baudrate,
         }
     });
 
-    qDebug() << "SerialWorker: 协议模式串口已打开" << port << baudrate
+    qDebug() << "SerialWorker: 二进制协议模式串口已打开" << port << baudrate
              << "协议:" << protocolDef.value("name").toString();
 #else
     Q_UNUSED(port); Q_UNUSED(baudrate);
@@ -186,26 +183,24 @@ void SerialWorker::stopReceiving() {
     }
 #endif
     m_genericParser.reset();
+    m_textParser.reset();
     qDebug() << "SerialWorker: 已停止";
 }
 
 #ifdef HAVE_QT_SERIAL_PORT
-void SerialWorker::onCsvReadyRead() {
+void SerialWorker::onTextReadyRead() {
     if (!m_serial) return;
     QByteArray raw = m_serial->readAll();
     QString text = QString::fromUtf8(raw);
-    emit rawDataReceived("serial", text.trimmed());
 
-    m_csvLineBuffer += text;
-    while (true) {
-        int pos = m_csvLineBuffer.indexOf('\n');
-        if (pos < 0) break;
-        QString line = m_csvLineBuffer.left(pos).trimmed();
-        m_csvLineBuffer = m_csvLineBuffer.mid(pos + 1);
-        if (line.isEmpty()) continue;
-        auto result = parseCsvLineImpl(line);
-        if (result.has_value())
-            emit dataReceived("serial", result->prefix, result->values);
+    const QString trimmed = text.trimmed();
+    if (!trimmed.isEmpty())
+        emit rawDataReceived("serial", trimmed);
+
+    const auto results = m_textParser.feed(text);
+    for (const auto& r : results) {
+        emit parsedDataReceived("serial", m_textParser.formatDebug(r.snapshot));
+        emit dataReceived("serial", r.prefix, r.snapshot);
     }
 }
 
@@ -221,14 +216,6 @@ void SerialWorker::onProtocolReadyRead() {
     }
 }
 #endif // HAVE_QT_SERIAL_PORT
-
-std::optional<SerialWorker::ParseResult> SerialWorker::parseCsvLine(const QString& text) {
-    return parseCsvLineImpl(text);
-}
-
-std::optional<UdpWorker::ParseResult> UdpWorker::parseCsvLine(const QString& text) {
-    return parseCsvLineImpl(text);
-}
 
 // ── DataReceiver ─────────────────────────────────────────────
 
@@ -278,8 +265,8 @@ void DataReceiver::ensureSerialWorker() {
         m_serialRunning = false;
     });
 
-    connect(this, &DataReceiver::_startSerialCsv,
-            m_serialWorker, &SerialWorker::startCsv);
+    connect(this, &DataReceiver::_startSerialText,
+            m_serialWorker, &SerialWorker::startText);
     connect(this, &DataReceiver::_startSerialProtocol,
             m_serialWorker, &SerialWorker::startProtocol);
     connect(this, &DataReceiver::_stopSerialWorker,
@@ -291,11 +278,24 @@ void DataReceiver::ensureSerialWorker() {
     m_serialThread->start();
 }
 
+QJsonObject DataReceiver::resolveUdpTextProtocol() {
+    auto& cfg = ConfigLoader::instance();
+    // 若当前活跃协议为文本类型，UDP 复用之
+    if (cfg.isTextProtocol() && !cfg.getProtocolDef().isEmpty())
+        return cfg.getProtocolDef();
+    // 否则加载 csv.json 作为 UDP 默认文本协议
+    QJsonObject csv = ConfigLoader::loadProtocolDef("csv");
+    if (csv.isEmpty()) {
+        qWarning() << "DataReceiver: protocols/csv.json 不存在，UDP 将以空协议启动";
+    }
+    return csv;
+}
+
 void DataReceiver::startUdp(const QString& ip, int port) {
     if (m_udpRunning) return;
     ensureUdpWorker();
     m_udpRunning = true;
-    emit _startUdpWorker(ip, port);
+    emit _startUdpWorker(ip, port, resolveUdpTextProtocol());
     qDebug() << "DataReceiver: 启动 UDP" << ip << ":" << port;
 }
 
@@ -312,21 +312,38 @@ void DataReceiver::startSerial(const QString& port, int baudrate,
     ensureSerialWorker();
     m_serialRunning = true;
 
-    if (protocol == "csv") {
-        emit _startSerialCsv(port, baudrate);
-    } else {
-        auto& cfg = ConfigLoader::instance();
-        QJsonObject protocolDef = cfg.getProtocolDef();
-        QVariantMap varOverrides = cfg.getProtocolVariableOverrides();
+    auto& cfg = ConfigLoader::instance();
 
-        if (protocolDef.isEmpty()) {
-            qWarning() << "DataReceiver: 协议定义未加载，回退为 CSV 模式";
-            emit _startSerialCsv(port, baudrate);
-        } else {
-            emit _startSerialProtocol(port, baudrate, protocolDef, varOverrides);
-        }
+    // 协议定义优先级：显式 protocol 参数 > ConfigLoader 活跃协议
+    QJsonObject protocolDef;
+    if (!protocol.isEmpty()) {
+        protocolDef = ConfigLoader::loadProtocolDef(protocol);
+    } else {
+        protocolDef = cfg.getProtocolDef();
     }
-    qDebug() << "DataReceiver: 启动串口" << port << baudrate << "协议:" << protocol;
+
+    if (protocolDef.isEmpty()) {
+        qWarning() << "DataReceiver: 协议定义未加载，尝试回退到 csv";
+        protocolDef = ConfigLoader::loadProtocolDef("csv");
+    }
+
+    const QString framingType = protocolDef.value("framing").toObject()
+                                           .value("type").toString();
+
+    if (framingType.startsWith("text_")) {
+        emit _startSerialText(port, baudrate, protocolDef);
+    } else if (!framingType.isEmpty()) {
+        emit _startSerialProtocol(port, baudrate, protocolDef,
+                                  cfg.getProtocolVariableOverrides());
+    } else {
+        qWarning() << "DataReceiver: 无法识别 framing.type，回退为 csv 文本";
+        QJsonObject csv = ConfigLoader::loadProtocolDef("csv");
+        emit _startSerialText(port, baudrate, csv);
+    }
+
+    qDebug() << "DataReceiver: 启动串口" << port << baudrate
+             << "协议:" << protocolDef.value("name").toString()
+             << "framing:" << framingType;
 }
 
 void DataReceiver::stopSerial() {

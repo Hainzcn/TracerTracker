@@ -113,6 +113,11 @@ private:
     QFormLayout*   m_varsLayout     = nullptr;
     QMap<QString, FocusSpinBox*> m_varSpins;
 
+    // 文本协议参数区（text_csv / text_regex 时显示；仅只读展示）
+    QLabel*        m_varsTitleLabel  = nullptr;   // "量程" 小标题（非文本协议时显示）
+    QLabel*        m_textTitleLabel  = nullptr;   // "文本参数" 小标题
+    QLabel*        m_textParamsLabel = nullptr;   // 多行只读内容
+
     // 字段映射区
     QList<PurposeGroup> m_purposeGroups;
 

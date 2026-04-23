@@ -220,9 +220,6 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_statusTimer, &QTimer::timeout, this, &MainWindow::checkStatusTimeout);
     m_statusTimer->start(1000);
 
-    // ── 初始化尾迹长度 ──
-    m_viewer->setTrailLength(m_trailLengthSpin->value());
-
     // 延迟定位叠加层（等待布局完成）
     m_viewer->installEventFilter(this);
     QTimer::singleShot(0, this, &MainWindow::repositionOverlays);
@@ -260,37 +257,21 @@ void MainWindow::buildStatusBar() {
     sbl->addWidget(m_debugCheckbox);
 
     sbl->addSpacing(16);
-    m_fullPathCheckbox = new QCheckBox("全路径");
+    m_fullPathCheckbox = new QCheckBox("绘制路径");
     m_fullPathCheckbox->setStyleSheet(Styles::STYLE_CHECKBOX());
     connect(m_fullPathCheckbox, &QCheckBox::toggled,
             this, &MainWindow::toggleFullPathMode);
     sbl->addWidget(m_fullPathCheckbox);
 
     sbl->addSpacing(16);
-    m_trailCheckbox = new QCheckBox("速度尾迹");
+    m_trailCheckbox = new QCheckBox("路径着色");
     m_trailCheckbox->setStyleSheet(Styles::STYLE_CHECKBOX());
     connect(m_trailCheckbox, &QCheckBox::toggled,
             this, &MainWindow::toggleTrailMode);
     sbl->addWidget(m_trailCheckbox);
 
-    sbl->addSpacing(8);
-    m_trailLengthLabel = new QLabel("长度");
-    m_trailLengthLabel->setStyleSheet("color: #666666; font-size: 12px;"
-        " font-family: 'Microsoft YaHei', sans-serif; border: none;");
-    sbl->addWidget(m_trailLengthLabel);
-
-    m_trailLengthSpin = new QSpinBox(this);
-    m_trailLengthSpin->setRange(10, 5000);
-    m_trailLengthSpin->setValue(120);
-    m_trailLengthSpin->setFixedWidth(72);
-    m_trailLengthSpin->setFixedHeight(22);
-    m_trailLengthSpin->setStyleSheet(Styles::STYLE_SPINBOX());
-    connect(m_trailLengthSpin, qOverload<int>(&QSpinBox::valueChanged),
-            this, &MainWindow::onTrailLengthChanged);
-    sbl->addWidget(m_trailLengthSpin);
-
-    m_trailLengthSpin->setEnabled(false);
-    m_trailLengthLabel->setEnabled(false);
+    // 路径着色依赖绘制路径，未勾选时禁用
+    m_trailCheckbox->setEnabled(false);
 }
 
 // ── 叠加层定位 ────────────────────────────────────────────────
@@ -649,20 +630,11 @@ void MainWindow::clearScene() {
 
 void MainWindow::toggleFullPathMode(bool checked) {
     m_viewer->setFullPathMode(checked);
+    m_trailCheckbox->setEnabled(checked);
 }
 
 void MainWindow::toggleTrailMode(bool checked) {
-    m_viewer->setTrailMode(checked);
-    m_trailLengthSpin->setEnabled(checked);
-    m_trailLengthLabel->setEnabled(checked);
-    m_trailLengthLabel->setStyleSheet(
-        checked ? Styles::STATUS_LABEL_STYLE()
-                : "color: #555; font-size: 12px; border: none;"
-    );
-}
-
-void MainWindow::onTrailLengthChanged(int value) {
-    m_viewer->setTrailLength(value);
+    m_viewer->setPathColorMode(checked);
 }
 
 // ── 状态超时检测 ──────────────────────────────────────────────

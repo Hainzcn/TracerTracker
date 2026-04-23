@@ -10,15 +10,19 @@
 #  include <QSerialPort>
 #endif
 #include "GenericFrameParser.h"
+#include "TextProtocolParser.h"
 #include "config/ConfigLoader.h"
 
 // ============================================================
 // DataReceiver.h — 数据接收器（后台线程 + Qt 信号槽）
 //
 // 架构：
-//   - UdpWorker  运行在独立 QThread 中，使用事件驱动 QUdpSocket
+//   - UdpWorker    运行在独立 QThread 中，使用事件驱动 QUdpSocket
 //   - SerialWorker 运行在独立 QThread 中，使用 QSerialPort
 //   - DataReceiver 作为主控对象，提供公共接口和信号
+//
+// 文本 / 二进制协议由 TextProtocolParser / GenericFrameParser 两个
+// 配置驱动的解析器处理；DataReceiver 按 framing.type 分派到不同路径。
 //
 // 所有信号均通过 Qt::QueuedConnection 跨线程发送到主线程
 // ============================================================
@@ -30,10 +34,10 @@ class UdpWorker : public QObject {
 public:
     explicit UdpWorker(QObject* parent = nullptr);
 
-    struct ParseResult { QString prefix; QList<double> values; };
-
 public slots:
-    void startReceiving(const QString& ip, int port);
+    // 启动 UDP 接收；protocolDef 为文本协议定义（UDP 只处理文本）
+    void startReceiving(const QString& ip, int port,
+                        const QJsonObject& protocolDef);
     void stopReceiving();
 
 signals:
@@ -45,10 +49,9 @@ private slots:
     void onReadyRead();
 
 private:
-    QUdpSocket* m_socket = nullptr;
-    bool        m_running = false;
-
-    static std::optional<ParseResult> parseCsvLine(const QString& text);
+    QUdpSocket*        m_socket = nullptr;
+    bool               m_running = false;
+    TextProtocolParser m_textParser;
 };
 
 // ── 串口工作者对象（运行在后台线程）────────────────────────────
@@ -59,7 +62,10 @@ public:
     explicit SerialWorker(QObject* parent = nullptr);
 
 public slots:
-    void startCsv(const QString& port, int baudrate);
+    // 启动文本协议模式（text_csv / text_regex）
+    void startText(const QString& port, int baudrate,
+                   const QJsonObject& protocolDef);
+    // 启动二进制协议模式（header_length 等）
     void startProtocol(const QString& port, int baudrate,
                        const QJsonObject& protocolDef,
                        const QVariantMap& variableOverrides);
@@ -74,7 +80,7 @@ signals:
 
 private slots:
 #ifdef HAVE_QT_SERIAL_PORT
-    void onCsvReadyRead();
+    void onTextReadyRead();
     void onProtocolReadyRead();
 #endif
 
@@ -83,12 +89,11 @@ private:
     QSerialPort*       m_serial = nullptr;
 #endif
     GenericFrameParser m_genericParser;
+    TextProtocolParser m_textParser;
     bool               m_running = false;
 
-    QString m_csvLineBuffer;
-
-    using ParseResult = UdpWorker::ParseResult;
-    static std::optional<ParseResult> parseCsvLine(const QString& text);
+    // 是否使用文本模式（区分 onTextReadyRead / onProtocolReadyRead 行为）
+    bool m_textMode = false;
 };
 
 // ── DataReceiver 主控对象（主线程持有）──────────────────────────
@@ -106,8 +111,9 @@ public:
     void stopUdp();
 
     // 启动串口接收（自动从 ConfigLoader 获取协议定义）
+    // protocol 参数保留供显式覆盖；默认走 ConfigLoader 的活跃协议
     void startSerial(const QString& port, int baudrate,
-                     const QString& protocol = "csv");
+                     const QString& protocol = QString());
     void stopSerial();
     void stopAll();
 
@@ -119,9 +125,11 @@ signals:
     void serialStopped();
 
     // 内部信号
-    void _startUdpWorker(const QString& ip, int port);
+    void _startUdpWorker(const QString& ip, int port,
+                         const QJsonObject& protocolDef);
     void _stopUdpWorker();
-    void _startSerialCsv(const QString& port, int baud);
+    void _startSerialText(const QString& port, int baud,
+                          const QJsonObject& protocolDef);
     void _startSerialProtocol(const QString& port, int baud,
                                const QJsonObject& protocolDef,
                                const QVariantMap& variableOverrides);
@@ -138,4 +146,7 @@ private:
 
     void ensureUdpWorker();
     void ensureSerialWorker();
+
+    // 为 UDP 选择文本协议定义：若活跃协议为 text_* 则复用；否则加载 csv
+    static QJsonObject resolveUdpTextProtocol();
 };

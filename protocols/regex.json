@@ -1,0 +1,28 @@
+{
+    "name": "regex",
+    "description": "正则表达式文本协议（按捕获组映射到字段）— 示例模板，按需修改 pattern/captures",
+
+    "variables": {},
+
+    "framing": {
+        "type": "text_regex"
+    },
+
+    "text": {
+        "line_terminator": "\n",
+        "pattern": "^(?:(?<prefix>\\w+):)?\\s*ax=([-+]?[\\d.eE+-]+),\\s*ay=([-+]?[\\d.eE+-]+),\\s*az=([-+]?[\\d.eE+-]+).*$",
+        "prefix_group": "prefix",
+        "captures": [
+            { "field": "ax", "group": 1, "multiplier": 1.0 },
+            { "field": "ay", "group": 2 },
+            { "field": "az", "group": 3 }
+        ],
+        "on_parse_error": "nan"
+    },
+
+    "frames": [],
+
+    "snapshot_order": [
+        "ax", "ay", "az"
+    ]
+}

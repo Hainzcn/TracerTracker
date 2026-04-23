@@ -3,7 +3,6 @@
 #include "ins/MathUtils.h"
 #include <QLabel>
 #include <QCheckBox>
-#include <QSpinBox>
 #include <QPushButton>
 #include <QPropertyAnimation>
 #include <QVariantAnimation>
@@ -68,10 +67,9 @@ private slots:
     // 日志消息转发
     void onPoseLog(const QString& msg);
     void onViewerLog(const QString& msg);
-    // 全路径/尾迹复选框
+    // 绘制路径/路径着色复选框
     void toggleFullPathMode(bool checked);
     void toggleTrailMode(bool checked);
-    void onTrailLengthChanged(int value);
     // 状态超时检测（每 1s 触发）
     void checkStatusTimeout();
     // 面板动画完成
@@ -129,8 +127,6 @@ private:
     QCheckBox* m_debugCheckbox     = nullptr;
     QCheckBox* m_fullPathCheckbox  = nullptr;
     QCheckBox* m_trailCheckbox     = nullptr;
-    QLabel*    m_trailLengthLabel  = nullptr;
-    QSpinBox*  m_trailLengthSpin   = nullptr;
 
     // ── 面板动画 ──
     QPropertyAnimation* m_attitudePanelAnim    = nullptr;

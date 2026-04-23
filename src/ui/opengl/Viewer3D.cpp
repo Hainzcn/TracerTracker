@@ -499,9 +499,8 @@ void Viewer3D::clearAll() {
     update();
 }
 
-void Viewer3D::setFullPathMode(bool e) { if (m_trackRenderer) m_trackRenderer->setFullPathMode(e); update(); }
-void Viewer3D::setTrailMode(bool e)    { if (m_trackRenderer) m_trackRenderer->setTrailMode(e);    update(); }
-void Viewer3D::setTrailLength(int l)   { if (m_trackRenderer) m_trackRenderer->setTrailLength(l);  update(); }
+void Viewer3D::setFullPathMode(bool e)  { if (m_trackRenderer) m_trackRenderer->setFullPathMode(e);  update(); }
+void Viewer3D::setPathColorMode(bool e) { if (m_trackRenderer) m_trackRenderer->setPathColorMode(e); update(); }
 
 void Viewer3D::setRenderDebugOptions(bool enabled, bool verbosePointUpdates) {
     m_renderDebugEnabled        = enabled;

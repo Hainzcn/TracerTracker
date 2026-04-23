@@ -181,6 +181,13 @@ void TrackRenderer::compactHistory(PointData& pd) {
         newHistory.push_back(pd.history[i]);
 
     pd.history = std::move(newHistory);
+
+    // 降采样后样本变稀，相邻段距分布改变，重新计算最大段距作为着色归一化基准
+    pd.maxSampleSpeed = 1e-6f;
+    for (size_t i = 1; i < pd.history.size(); ++i) {
+        float seg = (pd.history[i] - pd.history[i-1]).length();
+        if (seg > pd.maxSampleSpeed) pd.maxSampleSpeed = seg;
+    }
 }
 
 // ── 公有接口 ──────────────────────────────────────────────────
@@ -192,7 +199,15 @@ void TrackRenderer::updatePoint(const QString& name, double x, double y, double 
     pd.color = color;
     pd.size  = size;
 
-    pd.history.push_back({float(x), float(y), float(z)});
+    QVector3D next{float(x), float(y), float(z)};
+
+    // 增量维护最大段距（着色归一化基准）
+    if (!pd.history.empty()) {
+        float seg = (next - pd.history.back()).length();
+        if (seg > pd.maxSampleSpeed) pd.maxSampleSpeed = seg;
+    }
+
+    pd.history.push_back(next);
 
     if ((int)pd.history.size() > FULL_PATH_RAW_MAX) {
         compactHistory(pd);
@@ -209,12 +224,8 @@ void TrackRenderer::clearAll() {
     m_dirty = true;
 }
 
-void TrackRenderer::setFullPathMode(bool enabled) { m_fullPathMode = enabled; m_dirty = true; }
-void TrackRenderer::setTrailMode(bool enabled)    { m_trailMode    = enabled; m_dirty = true; }
-void TrackRenderer::setTrailLength(int length) {
-    m_trailLength = std::max(10, length);
-    m_dirty = true;
-}
+void TrackRenderer::setFullPathMode(bool enabled)  { m_fullPathMode  = enabled; m_dirty = true; }
+void TrackRenderer::setPathColorMode(bool enabled) { m_pathColorMode = enabled; m_dirty = true; }
 
 // 当数据变更时重建缓存的顶点数组
 void TrackRenderer::rebuildCache() {
@@ -230,37 +241,28 @@ void TrackRenderer::rebuildCache() {
         float cb = float(pd.color.blueF());
         float ca = float(pd.color.alphaF());
 
-        if ((m_fullPathMode || m_trailMode) && pd.history.size() >= 2) {
-            if (m_trailMode) {
-                size_t total = pd.history.size();
-                size_t start = (total > (size_t)m_trailLength)
-                                 ? total - m_trailLength : 0;
-                size_t len = total - start;
+        // 仅当开启「绘制路径」时才生成线段顶点
+        if (m_fullPathMode && pd.history.size() >= 2) {
+            auto sampled = downsamplePath(pd.history, 1.5f);
+            const size_t segCount = sampled.size() > 0 ? sampled.size() - 1 : 0;
+            const float invDenom = (segCount > 0) ? 1.0f / float(segCount) : 0.0f;
+            const float invMaxSpeed = 1.0f / std::max(pd.maxSampleSpeed, 1e-6f);
 
-                std::vector<float> speeds;
-                float maxSpeed = 0;
-                for (size_t i = start + 1; i < total; ++i) {
-                    float d = (pd.history[i] - pd.history[i-1]).length();
-                    speeds.push_back(d);
-                    maxSpeed = std::max(maxSpeed, d);
-                }
-                if (maxSpeed < 1e-6f) maxSpeed = 1.0f;
+            for (size_t i = 0; i + 1 < sampled.size(); ++i) {
+                float alpha = 0.3f + 0.7f * float(i) * invDenom;
 
-                for (size_t i = 0; i + 1 < len; ++i) {
-                    size_t hi = start + i;
-                    float t = speeds[i] / maxSpeed;
-                    QVector4D c = velocityToColor(t);
-                    float alpha = 0.3f + 0.7f * float(i) / float(len);
-                    m_cachedLineVerts.push_back({pd.history[hi].x(),   pd.history[hi].y(),   pd.history[hi].z(),   c.x(), c.y(), c.z(), alpha});
-                    m_cachedLineVerts.push_back({pd.history[hi+1].x(), pd.history[hi+1].y(), pd.history[hi+1].z(), c.x(), c.y(), c.z(), alpha});
+                float r, g, b;
+                if (m_pathColorMode) {
+                    // 按当前段长度（≈瞬时速度）做颜色映射
+                    float seg = (sampled[i+1] - sampled[i]).length();
+                    QVector4D c = velocityToColor(seg * invMaxSpeed);
+                    r = c.x(); g = c.y(); b = c.z();
+                } else {
+                    r = cr; g = cg; b = cb;
                 }
-            } else {
-                auto sampled = downsamplePath(pd.history, 1.5f);
-                for (size_t i = 0; i + 1 < sampled.size(); ++i) {
-                    float alpha = 0.3f + 0.7f * float(i) / float(sampled.size());
-                    m_cachedLineVerts.push_back({sampled[i].x(),   sampled[i].y(),   sampled[i].z(),   cr, cg, cb, alpha});
-                    m_cachedLineVerts.push_back({sampled[i+1].x(), sampled[i+1].y(), sampled[i+1].z(), cr, cg, cb, alpha});
-                }
+
+                m_cachedLineVerts.push_back({sampled[i].x(),   sampled[i].y(),   sampled[i].z(),   r, g, b, alpha});
+                m_cachedLineVerts.push_back({sampled[i+1].x(), sampled[i+1].y(), sampled[i+1].z(), r, g, b, alpha});
             }
         }
 

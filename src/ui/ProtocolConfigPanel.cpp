@@ -165,11 +165,11 @@ void ProtocolConfigPanel::buildProtocolSection(QVBoxLayout* container)
     m_fieldListLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     container->addLayout(wrapIndent(m_fieldListLabel, INDENT_L3));
 
-    // L2：量程小标题
-    auto* varsTitle = new QLabel("量程", this);
-    varsTitle->setObjectName("subLabel");
-    varsTitle->setContentsMargins(0, 4, 0, 0);
-    container->addLayout(wrapIndent(varsTitle, INDENT_L2));
+    // L2：量程小标题（仅二进制协议显示）
+    m_varsTitleLabel = new QLabel("量程", this);
+    m_varsTitleLabel->setObjectName("subLabel");
+    m_varsTitleLabel->setContentsMargins(0, 4, 0, 0);
+    container->addLayout(wrapIndent(m_varsTitleLabel, INDENT_L2));
 
     // L3：量程参数编辑表单
     m_varsLayout = new QFormLayout();
@@ -181,6 +181,19 @@ void ProtocolConfigPanel::buildProtocolSection(QVBoxLayout* container)
     // 字段列允许扩展，使内部"右贴齐"包装器能将数值框推到右侧
     m_varsLayout->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
     container->addLayout(m_varsLayout);
+
+    // L2：文本参数小标题（仅 text_csv / text_regex 协议显示）
+    m_textTitleLabel = new QLabel("文本参数", this);
+    m_textTitleLabel->setObjectName("subLabel");
+    m_textTitleLabel->setContentsMargins(0, 4, 0, 0);
+    container->addLayout(wrapIndent(m_textTitleLabel, INDENT_L2));
+
+    // L3：文本参数内容（多行只读）
+    m_textParamsLabel = new QLabel(this);
+    m_textParamsLabel->setObjectName("fieldListLabel");
+    m_textParamsLabel->setWordWrap(true);
+    m_textParamsLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    container->addLayout(wrapIndent(m_textParamsLabel, INDENT_L3));
 }
 
 void ProtocolConfigPanel::buildMappingSection(QVBoxLayout* container)
@@ -289,13 +302,8 @@ void ProtocolConfigPanel::onProtocolChanged(int index)
     Q_UNUSED(index);
     QString name = m_protocolCombo->currentData().toString();
 
-    if (name == "csv") {
-        m_previewProtoDef = QJsonObject();
-        refreshProtocolInfo(m_previewProtoDef);
-        refreshFieldCombos({});
-        return;
-    }
-
+    // csv 与其他协议走相同路径：若 protocols/<name>.json 不存在则
+    // loadProtocolDef 返回空对象，refreshProtocolInfo 自然显示占位文案
     m_previewProtoDef = ConfigLoader::loadProtocolDef(name);
     refreshProtocolInfo(m_previewProtoDef);
 
@@ -342,8 +350,12 @@ void ProtocolConfigPanel::refreshProtocolInfo(const QJsonObject& protoDef)
     clearVarsLayout();
 
     if (protoDef.isEmpty()) {
-        m_descLabel->setText("CSV 文本协议（无二进制帧定义）");
+        m_descLabel->setText("(未找到协议定义文件)");
         m_fieldListLabel->setText("—");
+        // 默认隐藏文本参数与量程区
+        if (m_varsTitleLabel)  m_varsTitleLabel->setVisible(false);
+        if (m_textTitleLabel)  m_textTitleLabel->setVisible(false);
+        if (m_textParamsLabel) m_textParamsLabel->setVisible(false);
         return;
     }
 
@@ -354,6 +366,54 @@ void ProtocolConfigPanel::refreshProtocolInfo(const QJsonObject& protoDef)
     for (const QJsonValue& v : orderArr)
         fieldNames.append(v.toString());
     m_fieldListLabel->setText(fieldNames.join(", "));
+
+    // 按 framing.type 切换「量程参数」与「文本参数」子区的显示
+    const QString framingType = protoDef.value("framing").toObject()
+                                        .value("type").toString();
+    const bool isText = framingType.startsWith("text_");
+
+    if (m_varsTitleLabel)  m_varsTitleLabel->setVisible(!isText);
+    if (m_textTitleLabel)  m_textTitleLabel->setVisible(isText);
+    if (m_textParamsLabel) m_textParamsLabel->setVisible(isText);
+
+    if (isText) {
+        // 填充只读展示（本次改动不支持 UI 写回，编辑请直接改 JSON 文件）
+        const QJsonObject t = protoDef.value("text").toObject();
+        QStringList lines;
+
+        if (framingType == "text_csv") {
+            const QJsonObject pfx = t.value("prefix").toObject();
+            const QString pEnabled = pfx.value("enabled").toBool(false) ? "开启" : "关闭";
+            lines << QString("分隔符: %1").arg(t.value("delimiter").toString(","));
+            lines << QString("前缀: %1").arg(pEnabled);
+            if (pfx.value("enabled").toBool(false)) {
+                lines << QString("  · 分隔字符: %1").arg(pfx.value("delimiter").toString(":"));
+                lines << QString("  · 最大长度: %1").arg(pfx.value("max_length").toInt(16));
+            }
+            lines << QString("解析错误策略: %1").arg(t.value("on_parse_error").toString("strip"));
+            lines << QString("数字字符集: %1").arg(t.value("numeric_strip_charset").toString("0-9.+\\-eE"));
+        } else if (framingType == "text_regex") {
+            lines << QString("pattern: %1").arg(t.value("pattern").toString());
+            const QJsonValue pg = t.value("prefix_group");
+            if (pg.isString())       lines << QString("prefix_group: %1").arg(pg.toString());
+            else if (pg.isDouble())  lines << QString("prefix_group: %1").arg(pg.toInt());
+            const QJsonArray caps = t.value("captures").toArray();
+            lines << QString("captures: %1 项").arg(caps.size());
+            for (const QJsonValue& cv : caps) {
+                const QJsonObject co = cv.toObject();
+                const QJsonValue g = co.value("group");
+                const QString gStr = g.isString() ? g.toString() : QString::number(g.toInt());
+                lines << QString("  · %1 ← group %2 × %3")
+                            .arg(co.value("field").toString())
+                            .arg(gStr)
+                            .arg(co.value("multiplier").toDouble(1.0));
+            }
+            lines << QString("解析错误策略: %1").arg(t.value("on_parse_error").toString("strip"));
+        }
+
+        m_textParamsLabel->setText(lines.join("\n"));
+        return;  // 文本协议无 variables 表单需要填充
+    }
 
     QJsonObject varsObj = protoDef.value("variables").toObject();
     SerialConfig sc = ConfigLoader::instance().getSerialConfig();
@@ -451,10 +511,11 @@ void ProtocolConfigPanel::loadFromConfig()
 {
     m_protocolCombo->blockSignals(true);
     m_protocolCombo->clear();
-    m_protocolCombo->addItem("csv (文本)", "csv");
+    // 协议列表完全来自 protocols/*.json 扫描；csv.json / regex.json 也在其中
     QStringList protocols = ConfigLoader::availableProtocols();
-    for (const QString& name : protocols)
+    for (const QString& name : protocols) {
         m_protocolCombo->addItem(name, name);
+    }
 
     SerialConfig sc = ConfigLoader::instance().getSerialConfig();
     int idx = m_protocolCombo->findData(sc.protocol);

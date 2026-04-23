@@ -43,14 +43,11 @@ public:
     // 清除所有点和轨迹
     void clearAll();
 
-    // 全路径模式开关
+    // 绘制路径模式开关
     void setFullPathMode(bool enabled);
 
-    // 速度尾迹模式开关
-    void setTrailMode(bool enabled);
-
-    // 设置轨迹历史长度
-    void setTrailLength(int length);
+    // 路径按速度着色模式开关
+    void setPathColorMode(bool enabled);
 
     // 切换透视/正交投影（触发动画）
     void toggleProjection();

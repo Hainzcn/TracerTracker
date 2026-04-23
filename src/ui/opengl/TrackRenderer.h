@@ -15,11 +15,11 @@
 // TrackRenderer.h — 轨迹与点渲染器
 //
 // 功能：
-//   - 每个命名点维护位置历史（deque，可配置长度）
-//   - 全路径模式：绘制完整历史轨迹线
-//   - 速度尾迹模式：按速度大小渐变着色（蓝→青→绿→黄→红）
+//   - 每个命名点维护完整位置历史（deque，超出阈值自动压缩）
+//   - 绘制路径模式：渲染完整历史轨迹线（角度降采样以控制顶点数）
+//   - 路径着色模式：依赖绘制路径，按相邻点距对全路径做颜色映射
+//                    （蓝→青→绿→黄→红，归一化基准为动态最大段距）
 //   - 当前位置散点渲染
-//   - 路径降采样（角度阈值过滤冗余中间点）
 // ============================================================
 
 class TrackRenderer {
@@ -42,23 +42,21 @@ public:
     // 清除所有点和轨迹历史
     void clearAll();
 
-    // 设置是否显示完整历史路径（全路径模式）
+    // 设置是否绘制完整历史路径
     void setFullPathMode(bool enabled);
 
-    // 设置是否启用速度尾迹（按速度着色）
-    void setTrailMode(bool enabled);
-
-    // 设置轨迹历史长度（最多保留 length 个历史位置）
-    void setTrailLength(int length);
+    // 设置是否对路径按速度着色（仅在绘制路径开启时可见）
+    void setPathColorMode(bool enabled);
 
     // 在 paintGL() 中调用：绘制所有点和轨迹
     void render(const QMatrix4x4& mvpMatrix);
 
     // 返回所有点位置数据（用于 auto_fit_view 计算最大距离）
     struct PointData {
-        std::deque<QVector3D> history; // 历史位置
-        QColor color;                  // 点颜色
-        int    size;                   // 点大小
+        std::deque<QVector3D> history;     // 历史位置
+        QColor color;                      // 点颜色
+        int    size;                       // 点大小
+        float  maxSampleSpeed = 1e-6f;     // 相邻历史点距的动态最大值（着色归一化基准）
     };
     const QHash<QString, PointData>& points() const { return m_points; }
 
@@ -76,9 +74,8 @@ private:
     QOpenGLVertexArrayObject m_pointVao;  // 点顶点数组
 
     bool m_initialized    = false;
-    bool m_fullPathMode   = false;  // 全路径显示开关
-    bool m_trailMode      = false;  // 速度尾迹显示开关
-    int  m_trailLength    = 120;    // 历史长度
+    bool m_fullPathMode   = false;  // 是否绘制完整历史路径
+    bool m_pathColorMode  = false;  // 是否对路径按速度着色（依赖 m_fullPathMode）
 
     QHash<QString, PointData> m_points;  // 各命名点的数据
     bool m_dirty = false;               // 数据变更标记，延迟到 render 时重建

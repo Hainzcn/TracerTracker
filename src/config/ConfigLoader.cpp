@@ -397,14 +397,16 @@ void ConfigLoader::loadProtocol()
 
     QString protocolName = m_config.value("serial").toObject()
                                .value("protocol").toString();
-    if (protocolName.isEmpty() || protocolName == "csv") {
-        qDebug() << "ConfigLoader: 协议为 CSV 或空，跳过协议定义加载";
+    if (protocolName.isEmpty()) {
+        qDebug() << "ConfigLoader: 协议名为空，跳过协议定义加载";
         return;
     }
 
+    // 注：包括 "csv" 在内，所有协议都按文件查找。csv.json 若不存在则
+    // 退化为旧行为（无字段索引映射，points 沿用显式 index）
     QString path = protocolFilePath(protocolName);
     if (path.isEmpty()) {
-        qWarning() << "ConfigLoader: 未找到协议文件" << protocolName;
+        qWarning() << "ConfigLoader: 未找到协议文件" << protocolName << "，跳过加载";
         return;
     }
 
@@ -453,6 +455,11 @@ QVariantMap ConfigLoader::getProtocolVariableOverrides() const
 int ConfigLoader::resolveFieldIndex(const QString& fieldName) const
 {
     return m_fieldIndexMap.value(fieldName, -1);
+}
+
+QString ConfigLoader::getProtocolFramingType() const
+{
+    return m_protocolDef.value("framing").toObject().value("type").toString();
 }
 
 // ── Points 缓存 ──────────────────────────────────────────────
@@ -625,7 +632,7 @@ QStringList ConfigLoader::availableProtocols()
 
 QJsonObject ConfigLoader::loadProtocolDef(const QString& name)
 {
-    if (name.isEmpty() || name == "csv") return QJsonObject();
+    if (name.isEmpty()) return QJsonObject();
 
     QString path = protocolFilePath(name);
     if (path.isEmpty()) return QJsonObject();

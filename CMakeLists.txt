@@ -50,6 +50,7 @@ set(SOURCES
     src/ins/PoseProcessor.cpp
     src/io/Ms901mStreamParser.cpp
     src/io/GenericFrameParser.cpp
+    src/io/TextProtocolParser.cpp
     src/io/DataReceiver.cpp
     src/ui/opengl/Viewer3D.cpp
     src/ui/opengl/GridRenderer.cpp

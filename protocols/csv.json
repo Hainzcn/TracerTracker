@@ -1,0 +1,34 @@
+{
+    "name": "csv",
+    "description": "通用 CSV 文本协议（可配置前缀与非数字处理）",
+
+    "variables": {},
+
+    "framing": {
+        "type": "text_csv"
+    },
+
+    "text": {
+        "delimiter": ",",
+        "line_terminator": "\n",
+        "prefix": {
+            "enabled": false,
+            "delimiter": ":",
+            "max_length": 16
+        },
+        "on_parse_error": "strip",
+        "numeric_strip_charset": "0-9.+\\-eE"
+    },
+
+    "frames": [],
+
+    "snapshot_order": [
+        "ax", "ay", "az",
+        "gx", "gy", "gz",
+        "q0", "q1", "q2", "q3",
+        "mx", "my", "mz",
+        "temp",
+        "roll", "pitch", "yaw",
+        "pressure", "altitude"
+    ]
+}

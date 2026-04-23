@@ -55,6 +55,13 @@ public:
     // 是否已成功加载协议定义
     bool hasProtocol() const { return !m_protocolDef.isEmpty(); }
 
+    // 当前活跃协议的 framing.type（如 "text_csv" / "text_regex" / "header_length"）
+    // 协议未加载时返回空串
+    QString getProtocolFramingType() const;
+
+    // 当前活跃协议是否为文本类型（framing.type 以 "text_" 开头）
+    bool isTextProtocol() const { return getProtocolFramingType().startsWith("text_"); }
+
     // ── 协议管理 ────────────────────────────────────────────
 
     // 扫描 protocols/ 目录，返回可用协议名列表（不含 .json 后缀）
