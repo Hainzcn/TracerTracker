@@ -1,4 +1,4 @@
-#include "GridRenderer.h"
+#include "ui/opengl/GridRenderer.h"
 #include <QPainter>
 #include <QVector4D>
 #include <cmath>

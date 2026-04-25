@@ -3,7 +3,7 @@
 #include <QFont>
 #include <QIcon>
 
-#include "ui/MainWindow.h"
+#include "ui/window/MainWindow.h"
 
 // ============================================================
 // main.cpp — TracerTracker 程序入口

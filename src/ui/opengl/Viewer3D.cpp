@@ -1,6 +1,6 @@
-#include "Viewer3D.h"
-#include "GridRenderer.h"
-#include "TrackRenderer.h"
+#include "ui/opengl/Viewer3D.h"
+#include "ui/opengl/GridRenderer.h"
+#include "ui/opengl/TrackRenderer.h"
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QKeyEvent>

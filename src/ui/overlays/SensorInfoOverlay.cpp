@@ -1,4 +1,4 @@
-#include "SensorInfoOverlay.h"
+#include "ui/overlays/SensorInfoOverlay.h"
 #include <QGridLayout>
 #include <QMouseEvent>
 #include <QWheelEvent>

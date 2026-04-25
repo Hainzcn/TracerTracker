@@ -1,5 +1,5 @@
 #pragma once
-#include "FramelessWindow.h"
+#include "ui/window/FramelessWindow.h"
 #include "ins/MathUtils.h"
 #include <QLabel>
 #include <QCheckBox>

@@ -1,6 +1,6 @@
-#include "FramelessWindow.h"
-#include "Styles.h"
-#include "WindowIcons.h"
+#include "ui/window/FramelessWindow.h"
+#include "ui/common/Styles.h"
+#include "ui/common/WindowIcons.h"
 
 #include <QShowEvent>
 #include <QEvent>

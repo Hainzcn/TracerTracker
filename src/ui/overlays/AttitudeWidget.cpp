@@ -1,4 +1,4 @@
-#include "AttitudeWidget.h"
+#include "ui/overlays/AttitudeWidget.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPainter>

@@ -1,5 +1,5 @@
-#include "SideBar.h"
-#include "Styles.h"
+#include "ui/window/SideBar.h"
+#include "ui/common/Styles.h"
 #include <QIcon>
 
 SideBar::SideBar(QWidget* parent) : QWidget(parent) {
@@ -19,14 +19,14 @@ SideBar::SideBar(QWidget* parent) : QWidget(parent) {
     m_infoBtn->setToolTip("切换信息叠加层");
 
     m_configBtn = new QPushButton(this);
-    m_configBtn->setIcon(QIcon(":/svg/icons/Cog.svg"));
+    m_configBtn->setIcon(QIcon(":/svg/icons/Settings.svg"));
     m_configBtn->setIconSize(QSize(20, 20));
     m_configBtn->setCheckable(true);
     m_configBtn->setStyleSheet(Styles::SIDE_BAR_BTN_STYLE());
     m_configBtn->setToolTip("协议配置");
 
     m_settingsBtn = new QPushButton(this);
-    m_settingsBtn->setIcon(QIcon(":/svg/icons/Settings.svg"));
+    m_settingsBtn->setIcon(QIcon(":/svg/icons/Cog.svg"));
     m_settingsBtn->setIconSize(QSize(20, 20));
     m_settingsBtn->setStyleSheet(Styles::SIDE_BAR_BTN_STYLE());
     m_settingsBtn->setToolTip("设置");

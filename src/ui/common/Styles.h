@@ -51,7 +51,7 @@ inline QString STYLE_LABEL() {
 // 下拉框核心 QSS —— 传入 prefix 可将规则作用域化；空 prefix 作用于全局
 // 用法示例：
 //   STYLE_COMBO_QSS("")                            → 全局 QComboBox
-//   STYLE_COMBO_QSS("QWidget#configPanel")         → 限定于面板内部
+//   STYLE_COMBO_QSS("QWidget#sidePanel")           → 限定于面板内部
 inline QString STYLE_COMBO_QSS(const QString& prefix = QString()) {
     QString css = R"(
 @ QComboBox {
@@ -344,37 +344,37 @@ QPushButton:pressed { color: #dddddd; background: rgba(180,180,180,60); }
 )";
 }
 
-// ── 协议配置侧滑面板样式 ────────────────────────────────────
+// ── 侧滑面板样式（SidePanel 基类共用，所有面板 objectName=sidePanel）──
 
-inline QString CONFIG_PANEL_STYLE() {
+inline QString SIDE_PANEL_STYLE() {
     return R"(
-QWidget#configPanel {
+QWidget#sidePanel {
     background-color: #252526;
     border-right: 1px solid #333333;
 }
 
 /* ── 标签 ── */
-QWidget#configPanel QLabel {
+QWidget#sidePanel QLabel {
     color: #cccccc;
     font-size: 12px;
     font-family: 'Microsoft YaHei', sans-serif;
     border: none;
     background: transparent;
 }
-QWidget#configPanel QLabel#sectionTitle {
+QWidget#sidePanel QLabel#sectionTitle {
     color: #e0e0e0;
     font-size: 13px;
     font-weight: bold;
     padding-top: 2px;
     padding-bottom: 2px;
 }
-QWidget#configPanel QLabel#subLabel {
+QWidget#sidePanel QLabel#subLabel {
     color: #b8b8b8;
     font-size: 12px;
     padding-top: 2px;
     padding-bottom: 2px;
 }
-QWidget#configPanel QLabel#groupLabel {
+QWidget#sidePanel QLabel#groupLabel {
     color: #c8c8c8;
     font-size: 12px;
     font-weight: bold;
@@ -382,11 +382,11 @@ QWidget#configPanel QLabel#groupLabel {
     padding-top: 6px;
     padding-bottom: 2px;
 }
-QWidget#configPanel QLabel#descLabel {
+QWidget#sidePanel QLabel#descLabel {
     color: #888888;
     font-size: 11px;
 }
-QWidget#configPanel QLabel#fieldListLabel {
+QWidget#sidePanel QLabel#fieldListLabel {
     color: #9fa0a0;
     font-size: 11px;
     font-family: Consolas, monospace;
@@ -395,66 +395,66 @@ QWidget#configPanel QLabel#fieldListLabel {
     border-radius: 4px;
     padding: 6px 8px;
 }
-QWidget#configPanel QLabel#multSign {
+QWidget#sidePanel QLabel#multSign {
     color: #777777;
     font-size: 11px;
     padding: 0px 2px;
 }
 
 /* ── 按钮 ── */
-QWidget#configPanel QPushButton {
+QWidget#sidePanel QPushButton {
     color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
     background: #333333; border: 1px solid #4d4d4d;
     border-radius: 4px; padding: 4px 14px;
     min-height: 20px;
 }
-QWidget#configPanel QPushButton:hover { background-color: #404040; border-color: #666666; }
-QWidget#configPanel QPushButton:pressed { background-color: #2a2a2a; border-color: #4d4d4d; }
-QWidget#configPanel QPushButton#applyBtn {
+QWidget#sidePanel QPushButton:hover { background-color: #404040; border-color: #666666; }
+QWidget#sidePanel QPushButton:pressed { background-color: #2a2a2a; border-color: #4d4d4d; }
+QWidget#sidePanel QPushButton#applyBtn {
     color: #ffffff; background-color: #2e7d32; border: 1px solid #4caf50;
 }
-QWidget#configPanel QPushButton#applyBtn:hover { background-color: #388e3c; }
-QWidget#configPanel QPushButton#applyBtn:pressed { background-color: #1b5e20; }
-QWidget#configPanel QPushButton#closeBtn {
+QWidget#sidePanel QPushButton#applyBtn:hover { background-color: #388e3c; }
+QWidget#sidePanel QPushButton#applyBtn:pressed { background-color: #1b5e20; }
+QWidget#sidePanel QPushButton#closeBtn {
     background: transparent; border: none;
     border-radius: 4px; padding: 0px;
     min-width: 0px; min-height: 0px;
 }
-QWidget#configPanel QPushButton#closeBtn:hover { background: #E81123; }
-QWidget#configPanel QPushButton#closeBtn:pressed { background: #c50f1f; }
+QWidget#sidePanel QPushButton#closeBtn:hover { background: #E81123; }
+QWidget#sidePanel QPushButton#closeBtn:pressed { background: #c50f1f; }
 
 /* ── 滚动区与滚动条 ── */
-QWidget#configPanel QScrollArea {
+QWidget#sidePanel QScrollArea {
     background: transparent; border: none;
 }
-QWidget#configPanel QScrollBar:vertical {
+QWidget#sidePanel QScrollBar:vertical {
     border: none; background: transparent; width: 8px; margin: 0;
 }
-QWidget#configPanel QScrollBar::handle:vertical {
+QWidget#sidePanel QScrollBar::handle:vertical {
     background: #3f3f3f; min-height: 24px; border-radius: 4px;
 }
-QWidget#configPanel QScrollBar::handle:vertical:hover { background: #555555; }
-QWidget#configPanel QScrollBar::add-line:vertical,
-QWidget#configPanel QScrollBar::sub-line:vertical { height: 0; border: none; background: transparent; }
-QWidget#configPanel QScrollBar::add-page:vertical,
-QWidget#configPanel QScrollBar::sub-page:vertical { background: transparent; }
+QWidget#sidePanel QScrollBar::handle:vertical:hover { background: #555555; }
+QWidget#sidePanel QScrollBar::add-line:vertical,
+QWidget#sidePanel QScrollBar::sub-line:vertical { height: 0; border: none; background: transparent; }
+QWidget#sidePanel QScrollBar::add-page:vertical,
+QWidget#sidePanel QScrollBar::sub-page:vertical { background: transparent; }
 
 /* ── 分隔线 ── */
 QFrame#configSep { background-color: #333333; min-height: 1px; max-height: 1px; border: none; }
 )"
     // 复用顶栏剥离出的下拉框/数值框样式，scope 到面板内部
-    + STYLE_COMBO_QSS("QWidget#configPanel")
-    + STYLE_SPINBOX_QSS("QWidget#configPanel")
+    + STYLE_COMBO_QSS("QWidget#sidePanel")
+    + STYLE_SPINBOX_QSS("QWidget#sidePanel")
     // 面板专属覆盖：用相同的 min/max-height 锁死内容区，确保下拉框与
     // 数值框在面板内严格等高（消除 QStyle 对二者 frame margin 的细微差异）
     + R"(
-QWidget#configPanel QComboBox,
-QWidget#configPanel QDoubleSpinBox,
-QWidget#configPanel QSpinBox {
+QWidget#sidePanel QComboBox,
+QWidget#sidePanel QDoubleSpinBox,
+QWidget#sidePanel QSpinBox {
     min-height: 20px; max-height: 20px;
     padding-top: 1px; padding-bottom: 1px;
 }
-QWidget#configPanel QComboBox::drop-down { height: 16px; }
+QWidget#sidePanel QComboBox::drop-down { height: 16px; }
 )";
 }
 

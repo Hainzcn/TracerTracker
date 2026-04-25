@@ -1,5 +1,5 @@
-#include "ViewOrientationGizmo.h"
-#include "../ui/opengl/Viewer3D.h"
+#include "ui/overlays/ViewOrientationGizmo.h"
+#include "ui/opengl/Viewer3D.h"
 
 #include <QPainter>
 #include <QMouseEvent>

@@ -1,4 +1,4 @@
-#include "LegacyHotZone.h"
+#include "ui/overlays/LegacyHotZone.h"
 #include <QPainter>
 #include <QMouseEvent>
 #include <QWheelEvent>

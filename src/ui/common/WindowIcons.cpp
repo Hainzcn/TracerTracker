@@ -1,4 +1,4 @@
-#include "WindowIcons.h"
+#include "ui/common/WindowIcons.h"
 
 #include <QPainter>
 #include <QPen>

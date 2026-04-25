@@ -1,17 +1,12 @@
 #pragma once
-#include <QWidget>
-#include <QComboBox>
-#include <QDoubleSpinBox>
+#include "ui/common/SidePanel.h"
+#include "ui/common/FocusControls.h"
+#include "config/ConfigTypes.h"
+
 #include <QLabel>
-#include <QPushButton>
 #include <QFormLayout>
-#include <QVBoxLayout>
-#include <QScrollArea>
-#include <QWheelEvent>
-#include <QMouseEvent>
 #include <QJsonObject>
 #include <QMap>
-#include "config/ConfigTypes.h"
 
 // ============================================================
 // ProtocolConfigPanel — 协议配置侧滑面板
@@ -19,40 +14,11 @@
 // 区域 A（P4）：协议选择、字段预览、变量编辑
 // 区域 B（P5）：语义字段映射器（purpose → protocol field）
 //
-// 内含两个辅助子类：
-//   FocusComboBox  / FocusSpinBox —— 仅在获得焦点后才响应滚轮事件；
-//   未获焦点时滚轮事件忽略并向上传递，由外层滚动区消费。
+// 继承自 SidePanel：标题栏 / 关闭按钮 / 滚动区 / 动作栏 / QSS 与
+// 鼠标穿透屏蔽全部由基类提供，本类只关心业务控件构建与配置回填。
 // ============================================================
 
-// 仅在焦点态响应滚轮的 QComboBox
-class FocusComboBox : public QComboBox {
-    Q_OBJECT
-public:
-    explicit FocusComboBox(QWidget* parent = nullptr) : QComboBox(parent) {
-        setFocusPolicy(Qt::StrongFocus);
-    }
-protected:
-    void wheelEvent(QWheelEvent* ev) override {
-        if (hasFocus()) QComboBox::wheelEvent(ev);
-        else            ev->ignore();
-    }
-};
-
-// 仅在焦点态响应滚轮的 QDoubleSpinBox
-class FocusSpinBox : public QDoubleSpinBox {
-    Q_OBJECT
-public:
-    explicit FocusSpinBox(QWidget* parent = nullptr) : QDoubleSpinBox(parent) {
-        setFocusPolicy(Qt::StrongFocus);
-    }
-protected:
-    void wheelEvent(QWheelEvent* ev) override {
-        if (hasFocus()) QDoubleSpinBox::wheelEvent(ev);
-        else            ev->ignore();
-    }
-};
-
-class ProtocolConfigPanel : public QWidget {
+class ProtocolConfigPanel : public SidePanel {
     Q_OBJECT
 public:
     explicit ProtocolConfigPanel(QWidget* parent = nullptr);
@@ -60,19 +26,10 @@ public:
     void loadFromConfig();
 
     // 面板固定宽度（公开供 MainWindow 计算滑入/滑出位移）
-    static constexpr int PANEL_WIDTH = 360;
+    static constexpr int PANEL_WIDTH = SidePanel::DEFAULT_WIDTH;
 
 signals:
     void applied();
-    void closeRequested();
-
-protected:
-    // 禁止鼠标事件穿透到父 Viewer3D
-    void mousePressEvent(QMouseEvent* ev)   override { ev->accept(); }
-    void mouseReleaseEvent(QMouseEvent* ev) override { ev->accept(); }
-    void mouseMoveEvent(QMouseEvent* ev)    override { ev->accept(); }
-    void mouseDoubleClickEvent(QMouseEvent* ev) override { ev->accept(); }
-    void wheelEvent(QWheelEvent* ev)        override { ev->accept(); }
 
 private slots:
     void onProtocolChanged(int index);
@@ -92,10 +49,10 @@ private:
         QList<MappingRow> rows;
     };
 
-    void buildUI();
+    void buildContent();
     void buildProtocolSection(QVBoxLayout* container);
     void buildMappingSection(QVBoxLayout* container);
-    void buildActionBar(QVBoxLayout* container);
+    void buildActions();
 
     void refreshProtocolInfo(const QJsonObject& protoDef);
     void refreshFieldCombos(const QStringList& fieldNames);

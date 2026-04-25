@@ -55,18 +55,19 @@ set(SOURCES
     src/ui/opengl/Viewer3D.cpp
     src/ui/opengl/GridRenderer.cpp
     src/ui/opengl/TrackRenderer.cpp
-    src/ui/FramelessWindow.cpp
-    src/ui/WindowIcons.cpp
-    src/ui/ToolBar.cpp
-    src/ui/DebugConsole.cpp
-    src/ui/AttitudeWidget.cpp
-    src/ui/SensorChartPanel.cpp
-    src/ui/SensorInfoOverlay.cpp
-    src/ui/ViewOrientationGizmo.cpp
-    src/ui/MainWindow.cpp
-    src/ui/SideBar.cpp
-    src/ui/ProtocolConfigPanel.cpp
-    src/ui/LegacyHotZone.cpp
+    src/ui/common/SidePanel.cpp
+    src/ui/common/WindowIcons.cpp
+    src/ui/window/FramelessWindow.cpp
+    src/ui/window/MainWindow.cpp
+    src/ui/window/ToolBar.cpp
+    src/ui/window/SideBar.cpp
+    src/ui/panels/ProtocolConfigPanel.cpp
+    src/ui/panels/DebugConsole.cpp
+    src/ui/overlays/AttitudeWidget.cpp
+    src/ui/overlays/SensorChartPanel.cpp
+    src/ui/overlays/SensorInfoOverlay.cpp
+    src/ui/overlays/ViewOrientationGizmo.cpp
+    src/ui/overlays/LegacyHotZone.cpp
     resources/resources.qrc
 )
 

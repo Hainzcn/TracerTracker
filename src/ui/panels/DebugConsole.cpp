@@ -1,5 +1,5 @@
-#include "DebugConsole.h"
-#include "Styles.h"
+#include "ui/panels/DebugConsole.h"
+#include "ui/common/Styles.h"
 
 #include <QVBoxLayout>
 #include <QPainter>

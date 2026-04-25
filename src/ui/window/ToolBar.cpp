@@ -1,7 +1,7 @@
-#include "ToolBar.h"
-#include "Styles.h"
-#include "../io/DataReceiver.h"
-#include "../config/ConfigLoader.h"
+#include "ui/window/ToolBar.h"
+#include "ui/common/Styles.h"
+#include "io/DataReceiver.h"
+#include "config/ConfigLoader.h"
 
 #include <QLabel>
 #include <QStyledItemDelegate>

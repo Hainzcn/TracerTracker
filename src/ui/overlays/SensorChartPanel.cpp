@@ -1,4 +1,4 @@
-#include "SensorChartPanel.h"
+#include "ui/overlays/SensorChartPanel.h"
 #include <QPainter>
 #include <QPainterPath>
 #include <QElapsedTimer>

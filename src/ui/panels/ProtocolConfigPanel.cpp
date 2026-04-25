@@ -1,61 +1,19 @@
-#include "ProtocolConfigPanel.h"
-#include "Styles.h"
-#include "WindowIcons.h"
+#include "ui/panels/ProtocolConfigPanel.h"
 #include "config/ConfigLoader.h"
+
+#include <QPushButton>
 #include <QJsonArray>
-#include <QFrame>
 #include <QHBoxLayout>
+#include <QSizePolicy>
 #include <QDebug>
 
 // ============================================================
 // ProtocolConfigPanel.cpp — 协议配置面板实现
+//
+// 标题栏 / 关闭按钮 / 滚动区 / 动作栏 / QSS 由 SidePanel 基类
+// 提供。本文件只负责具体业务区段（协议定义、字段映射）的构建
+// 与 ConfigLoader 之间的双向同步。
 // ============================================================
-
-ProtocolConfigPanel::ProtocolConfigPanel(QWidget* parent)
-    : QWidget(parent)
-{
-    setObjectName("configPanel");
-    setFixedWidth(PANEL_WIDTH);
-    // 显式 resize，避免 QWidget 默认 640×480 在首次显示前导致父级
-    // 按错误宽度计算滑入/滑出位移
-    resize(PANEL_WIDTH, parent ? parent->height() : 480);
-
-    // 确保背景不透明渲染 + 阻止鼠标事件向父 Viewer3D 传递
-    setAttribute(Qt::WA_StyledBackground, true);
-    setAttribute(Qt::WA_NoMousePropagation, true);
-    setAutoFillBackground(true);
-
-    setStyleSheet(Styles::CONFIG_PANEL_STYLE());
-    buildUI();
-    loadFromConfig();
-}
-
-// ── 分级缩进常量 ─────────────────────────────────────────────
-//  L1 段落标题（"协议定义"/"字段映射"）      : 0
-//  L2 子标签（"协议" / "变量" / "ACC" ...）  : 10
-//  L3 具体内容（字段列表、变量表单、映射表） : 22
-
-static constexpr int INDENT_L2 = 10;
-static constexpr int INDENT_L3 = 22;
-
-// ── 辅助：创建带 configSep 对象名的分隔线 ────────────────────
-
-static QFrame* makeSeparator(QWidget* parent) {
-    auto* f = new QFrame(parent);
-    f->setObjectName("configSep");
-    f->setFrameShape(QFrame::NoFrame);
-    return f;
-}
-
-// ── 辅助：将一个 widget 包进带左缩进的 HBox ──────────────────
-
-static QHBoxLayout* wrapIndent(QWidget* w, int leftIndent) {
-    auto* h = new QHBoxLayout();
-    h->setContentsMargins(leftIndent, 0, 0, 0);
-    h->setSpacing(0);
-    h->addWidget(w);
-    return h;
-}
 
 // ── 辅助：把 var key 翻译为带单位的中文标签 ──────────────────
 
@@ -65,60 +23,26 @@ static QString varDisplayLabel(const QString& key) {
     return key;
 }
 
+// ── 构造 ────────────────────────────────────────────────────
+
+ProtocolConfigPanel::ProtocolConfigPanel(QWidget* parent)
+    : SidePanel("协议配置", PANEL_WIDTH, parent)
+{
+    buildContent();
+    buildActions();
+    loadFromConfig();
+}
+
 // ── UI 构建 ──────────────────────────────────────────────────
 
-void ProtocolConfigPanel::buildUI()
+void ProtocolConfigPanel::buildContent()
 {
-    auto* outerLayout = new QVBoxLayout(this);
-    outerLayout->setContentsMargins(0, 0, 0, 0);
-    outerLayout->setSpacing(0);
+    auto* layout = contentLayout();
 
-    // 标题栏
-    auto* titleBar = new QHBoxLayout();
-    titleBar->setContentsMargins(14, 10, 8, 10);
-    titleBar->setSpacing(0);
-
-    auto* titleLabel = new QLabel("协议配置", this);
-    titleLabel->setObjectName("sectionTitle");
-    titleBar->addWidget(titleLabel);
-    titleBar->addStretch();
-
-    // 复用 FramelessWindow 顶栏的 1px 像素叉号绘制，确保 UI 风格统一
-    auto* closeBtn = new QPushButton(this);
-    closeBtn->setObjectName("closeBtn");
-    closeBtn->setFixedSize(24, 24);
-    closeBtn->setIcon(WindowIcons::makeCloseIcon());
-    closeBtn->setIconSize(QSize(16, 16));
-    closeBtn->setCursor(Qt::PointingHandCursor);
-    connect(closeBtn, &QPushButton::clicked, this, &ProtocolConfigPanel::closeRequested);
-    titleBar->addWidget(closeBtn);
-
-    outerLayout->addLayout(titleBar);
-    outerLayout->addWidget(makeSeparator(this));
-
-    // 滚动区域
-    auto* scrollArea = new QScrollArea(this);
-    scrollArea->setWidgetResizable(true);
-    scrollArea->setFrameShape(QFrame::NoFrame);
-    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-
-    auto* scrollContent = new QWidget();
-    scrollContent->setObjectName("configScrollContent");
-    scrollContent->setStyleSheet("QWidget#configScrollContent { background: transparent; }");
-    auto* scrollLayout = new QVBoxLayout(scrollContent);
-    scrollLayout->setContentsMargins(14, 14, 14, 14);
-    scrollLayout->setSpacing(14);
-
-    buildProtocolSection(scrollLayout);
-    scrollLayout->addWidget(makeSeparator(scrollContent));
-    buildMappingSection(scrollLayout);
-    scrollLayout->addStretch();
-
-    scrollArea->setWidget(scrollContent);
-    outerLayout->addWidget(scrollArea, 1);
-
-    outerLayout->addWidget(makeSeparator(this));
-    buildActionBar(outerLayout);
+    buildProtocolSection(layout);
+    layout->addWidget(makeSeparator(layout->parentWidget()));
+    buildMappingSection(layout);
+    layout->addStretch();
 }
 
 void ProtocolConfigPanel::buildProtocolSection(QVBoxLayout* container)
@@ -273,11 +197,9 @@ void ProtocolConfigPanel::buildMappingSection(QVBoxLayout* container)
     }
 }
 
-void ProtocolConfigPanel::buildActionBar(QVBoxLayout* container)
+void ProtocolConfigPanel::buildActions()
 {
-    auto* actionLayout = new QHBoxLayout();
-    actionLayout->setContentsMargins(14, 10, 14, 10);
-    actionLayout->setSpacing(8);
+    auto* bar = actionLayout();
 
     auto* resetBtn = new QPushButton("重置", this);
     resetBtn->setObjectName("resetBtn");
@@ -289,10 +211,9 @@ void ProtocolConfigPanel::buildActionBar(QVBoxLayout* container)
     applyBtn->setCursor(Qt::PointingHandCursor);
     connect(applyBtn, &QPushButton::clicked, this, &ProtocolConfigPanel::onApply);
 
-    actionLayout->addWidget(resetBtn);
-    actionLayout->addStretch();
-    actionLayout->addWidget(applyBtn);
-    container->addLayout(actionLayout);
+    bar->addWidget(resetBtn);
+    bar->addStretch();
+    bar->addWidget(applyBtn);
 }
 
 // ── 协议切换 ────────────────────────────────────────────────

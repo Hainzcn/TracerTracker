@@ -1,4 +1,4 @@
-#include "TrackRenderer.h"
+#include "ui/opengl/TrackRenderer.h"
 #include <cmath>
 #include <algorithm>
 #include <QPainter>
