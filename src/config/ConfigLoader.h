@@ -75,6 +75,15 @@ public:
                                    const QVariantMap& vars,
                                    const QList<PointConfig>& sensorPoints);
 
+    // 一次性回写设置面板覆盖的 5 个段，然后 save + reload
+    // 不触碰 serial.protocol / serial.acc_fsr / serial.gyro_fsr / points
+    // —— 这些字段属于「协议配置面板」管辖，避免互相覆盖
+    void updateGeneralSettings(const SerialConfig&      serial,
+                               const UdpConfig&         udp,
+                               const InsConfig&         ins,
+                               const RenderDebugConfig& renderDebug,
+                               double                   gravityReference);
+
     // ── 持久化 ──────────────────────────────────────────────
 
     void save() const;

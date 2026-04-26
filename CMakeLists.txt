@@ -62,6 +62,7 @@ set(SOURCES
     src/ui/window/ToolBar.cpp
     src/ui/window/SideBar.cpp
     src/ui/panels/ProtocolConfigPanel.cpp
+    src/ui/panels/SettingsPanel.cpp
     src/ui/panels/DebugConsole.cpp
     src/ui/overlays/AttitudeWidget.cpp
     src/ui/overlays/SensorChartPanel.cpp

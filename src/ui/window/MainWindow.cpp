@@ -8,6 +8,7 @@
 #include "ui/overlays/SensorInfoOverlay.h"
 #include "ui/overlays/ViewOrientationGizmo.h"
 #include "ui/panels/ProtocolConfigPanel.h"
+#include "ui/panels/SettingsPanel.h"
 #include "ui/opengl/Viewer3D.h"
 #include "io/DataReceiver.h"
 #include "ins/PoseProcessor.h"
@@ -19,6 +20,7 @@
 #include <QEasingCurve>
 #include <QDateTime>
 #include <QAbstractAnimation>
+#include <QGraphicsOpacityEffect>
 #include <QPainter>
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -68,7 +70,7 @@ MainWindow::MainWindow(QWidget* parent)
     });
 
     connect(m_sideBar->settingsBtn(), &QPushButton::clicked, this, [this]() {
-        onViewerLog("Settings button clicked (Placeholder)");
+        toggleSettingsPanel();
     });
 
     // ── 右侧内容区 (垂直布局) ──
@@ -153,6 +155,90 @@ MainWindow::MainWindow(QWidget* parent)
                 m_viewer->repaint();
                 // 顶层窗口的 backing store 也可能持有旧像素（Qt6 OpenGL
                 // 合成路径下的已知问题），追加一次 update 兜底。
+                if (auto* top = m_viewer->window()) top->update();
+            }
+        }
+    });
+
+    // 同位淡入淡出：当用户在「协议配置」与「设置」面板之间切换时，不再
+    // 滑出再滑入，而是两个面板都停留在 (0,0) 上，通过 QGraphicsOpacityEffect
+    // 同步反向动画做内容替换。默认 opacity=1，滑入/出路径不会受影响。
+    //
+    // 关键：effect 挂在 SidePanel::contentHost() 而非 SidePanel 自身——这样
+    // 「面板背景」（#sidePanel 的深色底）始终保持不透明，只有内容（标题栏 +
+    // 滚动区 + 动作栏）真正参与淡入淡出。两个面板的 chrome 视觉一致，叠在
+    // (0,0) 时用户感知到的就是「面板纹丝不动，里面的内容做了一次轻微淡入」。
+    m_configFadeFx = new QGraphicsOpacityEffect(m_configPanel->contentHost());
+    m_configFadeFx->setOpacity(1.0);
+    m_configPanel->contentHost()->setGraphicsEffect(m_configFadeFx);
+    m_configFadeAnim = new QPropertyAnimation(m_configFadeFx, "opacity", this);
+    m_configFadeAnim->setDuration(160);
+    m_configFadeAnim->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_configFadeAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant&) {
+        if (m_viewer) m_viewer->update();
+    });
+    connect(m_configFadeAnim, &QPropertyAnimation::finished, this, [this]() {
+        // 淡到 0 的一方就是「被替换掉」的面板，需收回视觉层 + 同步 OpenGL 合成
+        if (m_configFadeFx && m_configFadeFx->opacity() < 0.01) {
+            m_configPanel->setVisible(false);
+            // 把不可见的面板挪回 hidden 槽位，避免下次再被 raise 时占据 (0,0)
+            m_configPanel->move(-ProtocolConfigPanel::PANEL_WIDTH, 0);
+            m_configFadeFx->setOpacity(1.0);  // 复位，下次滑入/淡入直接可用
+            if (m_viewer) {
+                m_viewer->repaint();
+                if (auto* top = m_viewer->window()) top->update();
+            }
+        }
+    });
+
+    // ── 通用设置面板（与协议面板共用左侧 (0,0) 滑入区，运行时互斥）──
+    m_settingsPanel = new SettingsPanel(m_viewer);
+    m_settingsPanel->setVisible(false);
+    connect(m_settingsPanel, &SettingsPanel::closeRequested, this, &MainWindow::toggleSettingsPanel);
+    connect(m_settingsPanel, &SettingsPanel::applied,        this, &MainWindow::onSettingsApplied);
+    connect(m_settingsPanel, &SettingsPanel::confirmed,      this, &MainWindow::onSettingsConfirmed);
+
+    // 动画配置完整照搬 m_configPanelAnim：finished 中 setVisible→move→
+    // viewer->repaint→top->update 的顺序是 Qt6 OpenGL 合成路径的已知必要
+    // 收尾，否则关闭瞬间会留下上一帧子控件像素。
+    m_settingsPanelAnim = new QPropertyAnimation(m_settingsPanel, "pos", this);
+    m_settingsPanelAnim->setDuration(200);
+    m_settingsPanelAnim->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_settingsPanelAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant&) {
+        if (m_viewer) m_viewer->update();
+    });
+    connect(m_settingsPanelAnim, &QPropertyAnimation::finished, this, [this]() {
+        if (m_settingsPanelExpanded) {
+            m_settingsPanel->move(0, 0);
+            if (m_viewer) m_viewer->update();
+        } else {
+            m_settingsPanel->setVisible(false);
+            m_settingsPanel->move(-SettingsPanel::PANEL_WIDTH, 0);
+            if (m_viewer) {
+                m_viewer->repaint();
+                if (auto* top = m_viewer->window()) top->update();
+            }
+        }
+    });
+
+    // 与 m_configFadeAnim 同结构，承担「设置面板」一侧的同位淡入淡出。
+    // 同样挂在 contentHost() 上，使面板深色背景在切换全程保持不透明。
+    m_settingsFadeFx = new QGraphicsOpacityEffect(m_settingsPanel->contentHost());
+    m_settingsFadeFx->setOpacity(1.0);
+    m_settingsPanel->contentHost()->setGraphicsEffect(m_settingsFadeFx);
+    m_settingsFadeAnim = new QPropertyAnimation(m_settingsFadeFx, "opacity", this);
+    m_settingsFadeAnim->setDuration(160);
+    m_settingsFadeAnim->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_settingsFadeAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant&) {
+        if (m_viewer) m_viewer->update();
+    });
+    connect(m_settingsFadeAnim, &QPropertyAnimation::finished, this, [this]() {
+        if (m_settingsFadeFx && m_settingsFadeFx->opacity() < 0.01) {
+            m_settingsPanel->setVisible(false);
+            m_settingsPanel->move(-SettingsPanel::PANEL_WIDTH, 0);
+            m_settingsFadeFx->setOpacity(1.0);
+            if (m_viewer) {
+                m_viewer->repaint();
                 if (auto* top = m_viewer->window()) top->update();
             }
         }
@@ -342,6 +428,15 @@ void MainWindow::repositionOverlays() {
         m_configPanel->raise();
     }
 
+    // 设置面板高度同步（与协议面板镜像）
+    if (m_settingsPanel->isVisible()) {
+        m_settingsPanel->setFixedHeight(vh);
+        if (m_settingsPanelAnim->state() != QAbstractAnimation::Running) {
+            m_settingsPanel->move(m_settingsPanelExpanded ? 0 : -SettingsPanel::PANEL_WIDTH, 0);
+        }
+        m_settingsPanel->raise();
+    }
+
     // SensorInfoOverlay：右下角
     m_sensorOverlay->adjustSize();
     m_sensorOverlay->move(vw - m_sensorOverlay->width() - mg,
@@ -431,6 +526,29 @@ void MainWindow::onSensorChartPanelAnimFinished() {
 // ── 协议配置面板滑入/出 ─────────────────────────────────────
 
 void MainWindow::toggleConfigPanel() {
+    // 互斥升级：协议面板与设置面板共用左侧 (0,0)。
+    //   · 若对方面板已展开 → 同位淡入淡出替换内容（不做滑出再滑入）。
+    //   · 否则按原本的滑入/滑出动画执行。
+    if (!m_configPanelExpanded && m_settingsPanelExpanded) {
+        crossFadeToPanel(/*toConfig=*/true);
+        return;
+    }
+
+    // 进入滑动路径前，先清理任何可能残留的淡入淡出状态：
+    //   · 若上一次刚完成 Settings→Config 的淡入，本面板 fx.opacity 已经是 1，
+    //     无影响；
+    //   · 若用户在淡入淡出过程中再点协议按钮，需要立刻收尾——把动画停掉，
+    //     opacity 复位为 1（确保滑出时面板可见），并强制隐藏对方面板（它在
+    //     淡到 0 之前其实仍然 visible）。
+    if (m_configFadeAnim   && m_configFadeAnim  ->state() == QAbstractAnimation::Running) m_configFadeAnim  ->stop();
+    if (m_settingsFadeAnim && m_settingsFadeAnim->state() == QAbstractAnimation::Running) m_settingsFadeAnim->stop();
+    if (m_configFadeFx)   m_configFadeFx  ->setOpacity(1.0);
+    if (m_settingsFadeFx) m_settingsFadeFx->setOpacity(1.0);
+    if (!m_settingsPanelExpanded && m_settingsPanel->isVisible()) {
+        m_settingsPanel->setVisible(false);
+        m_settingsPanel->move(-SettingsPanel::PANEL_WIDTH, 0);
+    }
+
     constexpr int panelW = ProtocolConfigPanel::PANEL_WIDTH;
     int viewH  = m_viewer->height();
     m_configPanel->setFixedHeight(viewH);
@@ -473,6 +591,169 @@ void MainWindow::toggleConfigPanel() {
     m_configPanelAnim->start();
     // 起始一帧也驱动一次重绘，避免 QOpenGLWidget 父控件残留上一帧像素
     if (m_viewer) m_viewer->update();
+}
+
+// ── 通用设置面板滑入/出 ─────────────────────────────────────
+
+void MainWindow::toggleSettingsPanel() {
+    // 互斥升级（与 toggleConfigPanel 反向对称）：若对方面板已展开 → 同位
+    // 淡入淡出替换内容；否则按原本的滑入/滑出动画执行。
+    if (!m_settingsPanelExpanded && m_configPanelExpanded) {
+        crossFadeToPanel(/*toConfig=*/false);
+        return;
+    }
+
+    // 滑动路径前清理任何残留的淡入淡出状态（详见 toggleConfigPanel 注释）。
+    if (m_configFadeAnim   && m_configFadeAnim  ->state() == QAbstractAnimation::Running) m_configFadeAnim  ->stop();
+    if (m_settingsFadeAnim && m_settingsFadeAnim->state() == QAbstractAnimation::Running) m_settingsFadeAnim->stop();
+    if (m_configFadeFx)   m_configFadeFx  ->setOpacity(1.0);
+    if (m_settingsFadeFx) m_settingsFadeFx->setOpacity(1.0);
+    if (!m_configPanelExpanded && m_configPanel->isVisible()) {
+        m_configPanel->setVisible(false);
+        m_configPanel->move(-ProtocolConfigPanel::PANEL_WIDTH, 0);
+    }
+
+    constexpr int panelW = SettingsPanel::PANEL_WIDTH;
+    int viewH = m_viewer->height();
+    m_settingsPanel->setFixedHeight(viewH);
+    if (m_settingsPanel->width() != panelW)
+        m_settingsPanel->resize(panelW, viewH);
+
+    const QPoint hiddenPos(-panelW, 0);
+    const QPoint visiblePos(0, 0);
+    QPoint current;
+
+    if (m_settingsPanelAnim->state() == QAbstractAnimation::Running) {
+        m_settingsPanelAnim->stop();
+        current = m_settingsPanel->pos();
+    } else if (m_settingsPanel->isVisible()) {
+        current = m_settingsPanel->pos();
+    } else {
+        current = hiddenPos;
+        m_settingsPanel->move(current);
+    }
+
+    m_settingsPanelExpanded = !m_settingsPanelExpanded;
+    if (m_sideBar->settingsBtn()->isChecked() != m_settingsPanelExpanded)
+        m_sideBar->settingsBtn()->setChecked(m_settingsPanelExpanded);
+
+    const QPoint target = m_settingsPanelExpanded ? visiblePos : hiddenPos;
+    m_settingsPanelAnim->setEasingCurve(
+        m_settingsPanelExpanded ? QEasingCurve::OutCubic : QEasingCurve::InCubic);
+
+    if (m_settingsPanelExpanded)
+        m_settingsPanel->loadFromConfig();
+
+    m_settingsPanel->setVisible(true);
+    m_settingsPanel->raise();
+    m_settingsPanelAnim->setStartValue(current);
+    m_settingsPanelAnim->setEndValue(target);
+    m_settingsPanelAnim->start();
+    if (m_viewer) m_viewer->update();
+}
+
+// ── 协议/设置面板同位淡入淡出 ─────────────────────────────────
+//
+// 使用前提：调用方已确认对方面板正处于展开态（位于 (0,0) 上）。本函数把
+// 目标面板也吸附到 (0,0)、置于 raise() 后的栈顶，然后驱动两条 opacity
+// 动画做镜像变化，实现「内容替换」式的过渡，而非滑出再滑入。
+//
+// 收尾由各自 fade animation 的 finished 槽完成（opacity≈0 一侧 setVisible(false)
+// + 复位 opacity，避免下次复用时初始就透明）。
+void MainWindow::crossFadeToPanel(bool toConfig) {
+    if (!m_viewer) return;
+
+    auto* inFx    = toConfig ? m_configFadeFx     : m_settingsFadeFx;
+    auto* outFx   = toConfig ? m_settingsFadeFx   : m_configFadeFx;
+    auto* inAnim  = toConfig ? m_configFadeAnim   : m_settingsFadeAnim;
+    auto* outAnim = toConfig ? m_settingsFadeAnim : m_configFadeAnim;
+
+    // 在 stop() 之前先采样：用于区分「全新淡入淡出」与「中途反向被打断」。
+    // —— 全新：incoming 默认 opacity 仍为 1（构造期初始值或上一轮收尾复位），
+    //          需要主动把它压回 0 才能看到由暗到明的过渡。
+    // —— 反向打断：incoming 此时已是上一轮的 outgoing，opacity 卡在 0~1 之
+    //          间的某个值；保留当前值作为起点能避免视觉跳变。
+    const bool incomingMidFade = (inAnim  && inAnim ->state() == QAbstractAnimation::Running);
+    const bool outgoingMidFade = (outAnim && outAnim->state() == QAbstractAnimation::Running);
+
+    // 立刻终止任何正在跑的滑动/淡入淡出动画——两面板都将停留在 (0,0)
+    if (m_configPanelAnim   && m_configPanelAnim  ->state() == QAbstractAnimation::Running) m_configPanelAnim  ->stop();
+    if (m_settingsPanelAnim && m_settingsPanelAnim->state() == QAbstractAnimation::Running) m_settingsPanelAnim->stop();
+    if (incomingMidFade) inAnim ->stop();
+    if (outgoingMidFade) outAnim->stop();
+
+    // 同步两面板的几何到 (0,0) 全高度
+    constexpr int cW    = ProtocolConfigPanel::PANEL_WIDTH;
+    constexpr int sW    = SettingsPanel::PANEL_WIDTH;
+    const int     viewH = m_viewer->height();
+    m_configPanel  ->setFixedHeight(viewH);
+    m_settingsPanel->setFixedHeight(viewH);
+    if (m_configPanel  ->width() != cW) m_configPanel  ->resize(cW, viewH);
+    if (m_settingsPanel->width() != sW) m_settingsPanel->resize(sW, viewH);
+    m_configPanel  ->move(0, 0);
+    m_settingsPanel->move(0, 0);
+    m_configPanel  ->setVisible(true);
+    m_settingsPanel->setVisible(true);
+
+    // 进入面板时先用 ConfigLoader 最新值刷新一次（与滑入路径保持一致）
+    if (toConfig) m_configPanel->loadFromConfig();
+    else          m_settingsPanel->loadFromConfig();
+
+    // 目标面板压在栈顶，避免视觉上被对方遮挡
+    if (toConfig) m_configPanel->raise();
+    else          m_settingsPanel->raise();
+
+    // 全新淡入淡出：把 incoming 强制压回 0，outgoing 拉满到 1，确保两侧
+    // 都有可见的过渡曲线（而非仅 outgoing 一方淡出、incoming 直接 pop 上）。
+    if (!incomingMidFade) inFx ->setOpacity(0.0);
+    if (!outgoingMidFade) outFx->setOpacity(1.0);
+
+    // 镜像动画：incoming opacity ↑ 1，outgoing opacity ↓ 0
+    inAnim ->setStartValue(inFx ->opacity());
+    inAnim ->setEndValue(1.0);
+    outAnim->setStartValue(outFx->opacity());
+    outAnim->setEndValue(0.0);
+    inAnim ->setEasingCurve(QEasingCurve::OutCubic);
+    outAnim->setEasingCurve(QEasingCurve::OutCubic);
+    inAnim ->start();
+    outAnim->start();
+
+    // 状态翻转 + SideBar 按钮 checked 同步（防止漂移）
+    m_configPanelExpanded   = toConfig;
+    m_settingsPanelExpanded = !toConfig;
+    if (m_sideBar->configBtn()  ->isChecked() != m_configPanelExpanded)
+        m_sideBar->configBtn()  ->setChecked(m_configPanelExpanded);
+    if (m_sideBar->settingsBtn()->isChecked() != m_settingsPanelExpanded)
+        m_sideBar->settingsBtn()->setChecked(m_settingsPanelExpanded);
+
+    m_viewer->update();
+}
+
+void MainWindow::onSettingsApplied() {
+    // 已由 SettingsPanel 内部完成 ConfigLoader::updateGeneralSettings + save。
+    // 这里只需重启正在运行的接收线程，让新的串口口型 / UDP 端口立刻生效。
+    auto& cfg = ConfigLoader::instance();
+    SerialConfig sCfg = cfg.getSerialConfig();
+    UdpConfig    uCfg = cfg.getUdpConfig();
+
+    if (m_dataReceiver->isSerialRunning()) {
+        m_dataReceiver->stopSerial();
+        m_dataReceiver->startSerial(sCfg.port, sCfg.baudrate, sCfg.protocol);
+    }
+    if (m_dataReceiver->isUdpRunning()) {
+        m_dataReceiver->stopUdp();
+        m_dataReceiver->startUdp(uCfg.ip, uCfg.port);
+    }
+
+    m_hasQuaternionSensor = cfg.hasSensorPurpose(PointPurpose::Quaternion);
+    onViewerLog("\u8bbe\u7f6e\u5df2\u5e94\u7528\uff0c\u5df2\u91cd\u542f\u63a5\u6536\u7ebf\u7a0b");  // "设置已应用，已重启接收线程"
+}
+
+void MainWindow::onSettingsConfirmed() {
+    // SettingsPanel 已写盘；这里仅关闭面板并提示下次启动生效
+    onViewerLog("\u8bbe\u7f6e\u5df2\u4fdd\u5b58\uff0c\u4e0b\u6b21\u542f\u52a8\u751f\u6548");  // "设置已保存，下次启动生效"
+    if (m_settingsPanelExpanded)
+        toggleSettingsPanel();
 }
 
 // ── 数据处理 ─────────────────────────────────────────────────

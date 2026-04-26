@@ -28,6 +28,7 @@ SideBar::SideBar(QWidget* parent) : QWidget(parent) {
     m_settingsBtn = new QPushButton(this);
     m_settingsBtn->setIcon(QIcon(":/svg/icons/Cog.svg"));
     m_settingsBtn->setIconSize(QSize(20, 20));
+    m_settingsBtn->setCheckable(true);
     m_settingsBtn->setStyleSheet(Styles::SIDE_BAR_BTN_STYLE());
     m_settingsBtn->setToolTip("设置");
 

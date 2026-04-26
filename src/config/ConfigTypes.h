@@ -25,6 +25,15 @@ struct SerialConfig {
     QString protocol = "atkms901m";  // 协议类型：csv 或 atkms901m
     int     accFsr   = 4;            // 加速度计满量程（G）
     int     gyroFsr  = 2000;         // 陀螺仪满量程（°/s）
+
+    // 与 QSerialPort::DataBits 枚举值一一对应（5/6/7/8）
+    int     dataBits    = 8;
+    // 与 QSerialPort::Parity 枚举值一一对应：0=No 2=Even 3=Odd 4=Mark 5=Space
+    int     parity      = 0;
+    // 与 QSerialPort::StopBits 枚举值一一对应：1=One 2=Two 3=OneAndHalf
+    int     stopBits    = 1;
+    // 与 QSerialPort::FlowControl 枚举值一一对应：0=No 1=Hardware 2=Software
+    int     flowControl = 0;
 };
 
 // 渲染调试配置

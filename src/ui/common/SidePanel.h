@@ -57,6 +57,12 @@ public:
     // 创建一条 1px configSep 分隔线（QSS 已定义 #configSep 样式）
     static QFrame* makeSeparator(QWidget* parent = nullptr);
 
+    // 内容承载层：标题栏 + 分隔线 + 滚动区 + 动作栏全部放在这一层 widget 里。
+    // 暴露给 MainWindow 用于挂载 QGraphicsOpacityEffect，从而在面板间切换时
+    // 可以「只对内容做淡入淡出，面板背景保持不动」——侧边深色底色由 SidePanel
+    // 自身（this）的 QSS 渲染，不受 effect 影响。
+    QWidget* contentHost() const { return m_contentHost; }
+
 signals:
     // 关闭按钮被点击；由外部决定隐藏/滑出动画
     void closeRequested();
@@ -80,6 +86,8 @@ private:
     void buildSkeleton(const QString& title);
 
     QVBoxLayout* m_outerLayout   = nullptr;
+    QWidget*     m_contentHost   = nullptr;
+    QVBoxLayout* m_bodyLayout    = nullptr;
     QVBoxLayout* m_contentLayout = nullptr;
     QHBoxLayout* m_actionLayout  = nullptr;
 };

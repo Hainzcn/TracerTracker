@@ -402,11 +402,14 @@ QWidget#sidePanel QLabel#multSign {
 }
 
 /* ── 按钮 ── */
+/* padding/min-height 收紧：动作栏由 ~50px 高降到 ~36px，文字面积占比由
+   24% 提升到 ~33%。closeBtn 在下面用更高优先级的 #closeBtn 选择器
+   完全覆盖（padding:0 / min-height:0），不受这里影响。 */
 QWidget#sidePanel QPushButton {
     color: #e0e0e0; font-size: 12px; font-family: 'Microsoft YaHei', sans-serif;
     background: #333333; border: 1px solid #4d4d4d;
-    border-radius: 4px; padding: 4px 14px;
-    min-height: 20px;
+    border-radius: 4px; padding: 3px 12px;
+    min-height: 18px;
 }
 QWidget#sidePanel QPushButton:hover { background-color: #404040; border-color: #666666; }
 QWidget#sidePanel QPushButton:pressed { background-color: #2a2a2a; border-color: #4d4d4d; }

@@ -92,14 +92,18 @@ QJsonObject ConfigLoader::buildDefaultJson() {
 
     // 串口默认配置
     QJsonObject serial;
-    serial["enabled"]  = true;
-    serial["port"]     = "COM5";
-    serial["baudrate"] = 115200;
-    serial["timeout"]  = 1;
-    serial["protocol"] = "atkms901m";
-    serial["acc_fsr"]  = 4;
-    serial["gyro_fsr"] = 2000;
-    root["serial"]     = serial;
+    serial["enabled"]      = true;
+    serial["port"]         = "COM5";
+    serial["baudrate"]     = 115200;
+    serial["timeout"]      = 1;
+    serial["protocol"]     = "atkms901m";
+    serial["acc_fsr"]      = 4;
+    serial["gyro_fsr"]     = 2000;
+    serial["data_bits"]    = 8;
+    serial["parity"]       = 0;
+    serial["stop_bits"]    = 1;
+    serial["flow_control"] = 0;
+    root["serial"]         = serial;
 
     // 渲染调试默认配置
     QJsonObject rd;
@@ -334,13 +338,17 @@ UdpConfig ConfigLoader::getUdpConfig() const {
 SerialConfig ConfigLoader::getSerialConfig() const {
     QJsonObject obj = m_config.value("serial").toObject();
     SerialConfig c;
-    c.enabled  = obj.value("enabled").toBool(true);
-    c.port     = obj.value("port").toString("COM5");
-    c.baudrate = obj.value("baudrate").toInt(115200);
-    c.timeout  = obj.value("timeout").toInt(1);
-    c.protocol = obj.value("protocol").toString("atkms901m");
-    c.accFsr   = obj.value("acc_fsr").toInt(4);
-    c.gyroFsr  = obj.value("gyro_fsr").toInt(2000);
+    c.enabled     = obj.value("enabled").toBool(true);
+    c.port        = obj.value("port").toString("COM5");
+    c.baudrate    = obj.value("baudrate").toInt(115200);
+    c.timeout     = obj.value("timeout").toInt(1);
+    c.protocol    = obj.value("protocol").toString("atkms901m");
+    c.accFsr      = obj.value("acc_fsr").toInt(4);
+    c.gyroFsr     = obj.value("gyro_fsr").toInt(2000);
+    c.dataBits    = obj.value("data_bits").toInt(8);
+    c.parity      = obj.value("parity").toInt(0);
+    c.stopBits    = obj.value("stop_bits").toInt(1);
+    c.flowControl = obj.value("flow_control").toInt(0);
     return c;
 }
 
@@ -711,6 +719,78 @@ void ConfigLoader::updateProtocolAndMappings(const QString& protocol,
     m_config["points"] = newPointsArr;
 
     save();
+    loadProtocol();
+    rebuildPointsCache();
+}
+
+// ── 通用设置回写 ──────────────────────────────────────────────
+
+void ConfigLoader::updateGeneralSettings(const SerialConfig&      serial,
+                                          const UdpConfig&         udp,
+                                          const InsConfig&         ins,
+                                          const RenderDebugConfig& renderDebug,
+                                          double                   gravityReference)
+{
+    // 串口段：保留 protocol / acc_fsr / gyro_fsr（属协议面板管辖）
+    QJsonObject sObj = m_config.value("serial").toObject();
+    sObj["enabled"]      = serial.enabled;
+    sObj["port"]         = serial.port;
+    sObj["baudrate"]     = serial.baudrate;
+    sObj["timeout"]      = serial.timeout;
+    sObj["data_bits"]    = serial.dataBits;
+    sObj["parity"]       = serial.parity;
+    sObj["stop_bits"]    = serial.stopBits;
+    sObj["flow_control"] = serial.flowControl;
+    m_config["serial"]   = sObj;
+
+    // UDP 段
+    QJsonObject uObj;
+    uObj["enabled"] = udp.enabled;
+    uObj["ip"]      = udp.ip;
+    uObj["port"]    = udp.port;
+    m_config["udp"] = uObj;
+
+    // INS 段（kalman / zupt / madgwick / mahony + 两个标量）
+    QJsonObject insObj;
+
+    QJsonObject kalman;
+    kalman["enabled"]              = ins.kalman.enabled;
+    kalman["process_noise_sigma"]  = ins.kalman.processNoiseSigma;
+    kalman["measurement_noise_R"]  = ins.kalman.measurementNoiseR;
+    insObj["kalman"] = kalman;
+
+    QJsonObject zupt;
+    zupt["enabled"]                = ins.zupt.enabled;
+    zupt["acc_variance_threshold"] = ins.zupt.accVarianceThreshold;
+    zupt["gyro_variance_threshold"]= ins.zupt.gyroVarianceThreshold;
+    zupt["window_size"]            = ins.zupt.windowSize;
+    insObj["zupt"] = zupt;
+
+    QJsonObject madgwick;
+    madgwick["beta"] = ins.madgwick.beta;
+    insObj["madgwick"] = madgwick;
+
+    QJsonObject mahony;
+    mahony["kp"] = ins.mahony.kp;
+    mahony["ki"] = ins.mahony.ki;
+    insObj["mahony"] = mahony;
+
+    insObj["baro_lpf_alpha"]        = ins.baroLpfAlpha;
+    insObj["filter_yaw_offset_deg"] = ins.filterYawOffsetDeg;
+    m_config["ins"] = insObj;
+
+    // 渲染调试段
+    QJsonObject rdObj;
+    rdObj["enabled"]               = renderDebug.enabled;
+    rdObj["verbose_point_updates"] = renderDebug.verbosePointUpdates;
+    m_config["render_debug"] = rdObj;
+
+    // 重力参考
+    m_config["gravity_reference"] = gravityReference;
+
+    save();
+    // serial.protocol 未变，但仍走一遍 loadProtocol/rebuild 保险，
+    // 与 updateProtocolAndMappings 对齐
     loadProtocol();
     rebuildPointsCache();
 }

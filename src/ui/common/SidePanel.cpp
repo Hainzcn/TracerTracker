@@ -54,18 +54,36 @@ void SidePanel::buildSkeleton(const QString& title)
     m_outerLayout->setContentsMargins(0, 0, 0, 0);
     m_outerLayout->setSpacing(0);
 
+    // ── 内容承载层 ──
+    // 把标题栏 / 分隔线 / 滚动区 / 动作栏统统放进 m_contentHost；这样
+    // MainWindow 在做面板间切换时，可只对 m_contentHost 挂 QGraphicsOpacityEffect
+    // 来做内容淡入淡出，而 SidePanel 自身（this）的深色背景始终保持不透明。
+    // contentHost 自身 NoBackground，背景全部由 #sidePanel 的 QSS 提供。
+    m_contentHost = new QWidget(this);
+    m_contentHost->setObjectName("sidePanelContentHost");
+    m_contentHost->setAutoFillBackground(false);
+    // 显式给 contentHost 一个空 stylesheet 段，避免它命中 #sidePanel 的背景；
+    // QSS 仍可以通过 #sidePanel xxx { ... } 的后代选择器作用到内部子控件上。
+    m_contentHost->setStyleSheet("QWidget#sidePanelContentHost { background: transparent; }");
+
+    m_bodyLayout = new QVBoxLayout(m_contentHost);
+    m_bodyLayout->setContentsMargins(0, 0, 0, 0);
+    m_bodyLayout->setSpacing(0);
+
+    m_outerLayout->addWidget(m_contentHost);
+
     // 标题栏
     auto* titleBar = new QHBoxLayout();
     titleBar->setContentsMargins(14, 10, 8, 10);
     titleBar->setSpacing(0);
 
-    auto* titleLabel = new QLabel(title, this);
+    auto* titleLabel = new QLabel(title, m_contentHost);
     titleLabel->setObjectName("sectionTitle");
     titleBar->addWidget(titleLabel);
     titleBar->addStretch();
 
     // 复用 FramelessWindow 顶栏的 1px 像素叉号绘制，确保叉号风格统一
-    auto* closeBtn = new QPushButton(this);
+    auto* closeBtn = new QPushButton(m_contentHost);
     closeBtn->setObjectName("closeBtn");
     closeBtn->setFixedSize(24, 24);
     closeBtn->setIcon(WindowIcons::makeCloseIcon());
@@ -74,11 +92,11 @@ void SidePanel::buildSkeleton(const QString& title)
     connect(closeBtn, &QPushButton::clicked, this, &SidePanel::closeRequested);
     titleBar->addWidget(closeBtn);
 
-    m_outerLayout->addLayout(titleBar);
-    m_outerLayout->addWidget(makeSeparator(this));
+    m_bodyLayout->addLayout(titleBar);
+    m_bodyLayout->addWidget(makeSeparator(m_contentHost));
 
     // 滚动区域
-    auto* scrollArea = new QScrollArea(this);
+    auto* scrollArea = new QScrollArea(m_contentHost);
     scrollArea->setWidgetResizable(true);
     scrollArea->setFrameShape(QFrame::NoFrame);
     scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -92,7 +110,7 @@ void SidePanel::buildSkeleton(const QString& title)
     m_contentLayout->setSpacing(14);
 
     scrollArea->setWidget(scrollContent);
-    m_outerLayout->addWidget(scrollArea, 1);
+    m_bodyLayout->addWidget(scrollArea, 1);
 }
 
 // ── 动作栏（按需懒加载）─────────────────────────────────────
@@ -101,11 +119,13 @@ QHBoxLayout* SidePanel::actionLayout()
 {
     if (m_actionLayout) return m_actionLayout;
 
-    m_outerLayout->addWidget(makeSeparator(this));
+    m_bodyLayout->addWidget(makeSeparator(m_contentHost));
 
     m_actionLayout = new QHBoxLayout();
-    m_actionLayout->setContentsMargins(14, 10, 14, 10);
+    // 上下边距由原本的 10/10 收紧到 6/6，让动作栏整体更扁、按钮文字面积
+    // 在条带高度中的占比提升（按钮高度由 Styles 中的 padding/min-height 控制）。
+    m_actionLayout->setContentsMargins(14, 6, 14, 6);
     m_actionLayout->setSpacing(8);
-    m_outerLayout->addLayout(m_actionLayout);
+    m_bodyLayout->addLayout(m_actionLayout);
     return m_actionLayout;
 }

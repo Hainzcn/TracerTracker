@@ -36,8 +36,10 @@ class SensorChartPanel;
 class SensorInfoOverlay;
 class ViewOrientationGizmo;
 class ProtocolConfigPanel;
+class SettingsPanel;
 class DataReceiver;
 class PoseProcessor;
+class QGraphicsOpacityEffect;
 
 class MainWindow : public FramelessWindow {
     Q_OBJECT
@@ -85,6 +87,12 @@ public slots:
     void toggleSensorChartPanel();
     // 切换协议配置面板显隐（带动画）
     void toggleConfigPanel();
+    // 切换通用设置面板显隐（带动画；与协议面板互斥）
+    void toggleSettingsPanel();
+    // 设置面板「应用」回调：写盘 + 重启运行中的接收线程
+    void onSettingsApplied();
+    // 设置面板「确定」回调：写盘后关闭面板（下次启动生效）
+    void onSettingsConfirmed();
 
 private:
     // ── 布局搭建 ──
@@ -119,6 +127,7 @@ private:
     ViewOrientationGizmo* m_gizmo          = nullptr;
     QPushButton*         m_projToggleBtn   = nullptr;
     ProtocolConfigPanel* m_configPanel     = nullptr;
+    SettingsPanel*       m_settingsPanel   = nullptr;
 
     // ── 状态栏控件 ──
     QWidget*   m_statusBarWidget   = nullptr;
@@ -132,9 +141,20 @@ private:
     QPropertyAnimation* m_attitudePanelAnim    = nullptr;
     QPropertyAnimation* m_sensorChartPanelAnim = nullptr;
     QPropertyAnimation* m_configPanelAnim      = nullptr;
+    QPropertyAnimation* m_settingsPanelAnim    = nullptr;
     bool m_attitudePanelExpanded    = false;
     bool m_sensorChartPanelExpanded = false;
     bool m_configPanelExpanded      = false;
+    bool m_settingsPanelExpanded    = false;
+
+    // 协议/设置两面板共用左侧 (0,0) 位置；当一栏已展开、用户点击另一栏时，
+    // 不再「滑出 + 滑入」，而是同位淡入淡出替换内容。
+    QGraphicsOpacityEffect* m_configFadeFx     = nullptr;
+    QGraphicsOpacityEffect* m_settingsFadeFx   = nullptr;
+    QPropertyAnimation*     m_configFadeAnim   = nullptr;
+    QPropertyAnimation*     m_settingsFadeAnim = nullptr;
+    // 在两面板间做同位淡入淡出替换（toConfig=true 表示切到协议配置面板）
+    void crossFadeToPanel(bool toConfig);
 
     // ── 状态计时 ──
     QTimer* m_statusTimer    = nullptr;

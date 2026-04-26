@@ -90,13 +90,17 @@ void SerialWorker::startText(const QString& port, int baudrate,
         return;
     }
 
-    m_serial   = new QSerialPort(this);
-    m_serial->setPortName(port);
-    m_serial->setBaudRate(static_cast<QSerialPort::BaudRate>(baudrate));
-    m_serial->setDataBits(QSerialPort::Data8);
-    m_serial->setParity(QSerialPort::NoParity);
-    m_serial->setStopBits(QSerialPort::OneStop);
-    m_serial->setFlowControl(QSerialPort::NoFlowControl);
+    {
+        // 串口口型参数从 ConfigLoader 取，避免硬编码（与 SettingsPanel 的回写联动）
+        SerialConfig sCfg = ConfigLoader::instance().getSerialConfig();
+        m_serial = new QSerialPort(this);
+        m_serial->setPortName(port);
+        m_serial->setBaudRate(static_cast<QSerialPort::BaudRate>(baudrate));
+        m_serial->setDataBits(static_cast<QSerialPort::DataBits>(sCfg.dataBits));
+        m_serial->setParity(static_cast<QSerialPort::Parity>(sCfg.parity));
+        m_serial->setStopBits(static_cast<QSerialPort::StopBits>(sCfg.stopBits));
+        m_serial->setFlowControl(static_cast<QSerialPort::FlowControl>(sCfg.flowControl));
+    }
 
     if (!m_serial->open(QIODevice::ReadOnly)) {
         qWarning() << "SerialWorker: 无法打开串口" << port << m_serial->errorString();
@@ -139,13 +143,16 @@ void SerialWorker::startProtocol(const QString& port, int baudrate,
         return;
     }
 
-    m_serial = new QSerialPort(this);
-    m_serial->setPortName(port);
-    m_serial->setBaudRate(static_cast<QSerialPort::BaudRate>(baudrate));
-    m_serial->setDataBits(QSerialPort::Data8);
-    m_serial->setParity(QSerialPort::NoParity);
-    m_serial->setStopBits(QSerialPort::OneStop);
-    m_serial->setFlowControl(QSerialPort::NoFlowControl);
+    {
+        SerialConfig sCfg = ConfigLoader::instance().getSerialConfig();
+        m_serial = new QSerialPort(this);
+        m_serial->setPortName(port);
+        m_serial->setBaudRate(static_cast<QSerialPort::BaudRate>(baudrate));
+        m_serial->setDataBits(static_cast<QSerialPort::DataBits>(sCfg.dataBits));
+        m_serial->setParity(static_cast<QSerialPort::Parity>(sCfg.parity));
+        m_serial->setStopBits(static_cast<QSerialPort::StopBits>(sCfg.stopBits));
+        m_serial->setFlowControl(static_cast<QSerialPort::FlowControl>(sCfg.flowControl));
+    }
 
     if (!m_serial->open(QIODevice::ReadOnly)) {
         qWarning() << "SerialWorker: 无法打开串口（协议模式）" << port;

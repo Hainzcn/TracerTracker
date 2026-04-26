@@ -149,10 +149,14 @@
     "serial": {
         "acc_fsr": 4,
         "baudrate": 115200,
+        "data_bits": 8,
         "enabled": true,
+        "flow_control": 0,
         "gyro_fsr": 2000,
+        "parity": 0,
         "port": "COM5",
         "protocol": "atkms901m",
+        "stop_bits": 1,
         "timeout": 1
     },
     "udp": {
